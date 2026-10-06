@@ -5,10 +5,13 @@
   "scripts": {
     "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite --host 127.0.0.1",
-    "dev:server": "node backend/server.js",
+    "dev:server": "node --watch backend/server.js",
     "build": "vite build",
     "start": "node backend/server.js",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test scripts/excel-presentation.test.mjs scripts/api.test.mjs",
+    "audit:excel": "node scripts/audit-excel.mjs --report",
+    "test:tables": "node scripts/check-table-render.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

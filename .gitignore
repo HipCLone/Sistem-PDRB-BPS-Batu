@@ -3,3 +3,5 @@ dist/
 backend/uploads/
 backend/data/db.json
 *.log
+backend/data/uploads/
+.local-backups/

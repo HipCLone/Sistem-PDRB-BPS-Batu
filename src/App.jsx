@@ -1,100 +1,29 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Routes, Route, Navigate, useLocation, useNavigate, Link, useParams } from 'react-router-dom';
-import { LayoutDashboard, Database, Bell, UserCircle, LogOut, Menu, X, ChevronRight, Upload, Plus, Search, Save, ShieldCheck, Building2, FileSpreadsheet, Activity, LockKeyhole } from 'lucide-react';
-import { api, clearSession, getUser, setSession } from './lib/api';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { AppErrorBoundary } from './components/ErrorBoundary';
+import Protected from './components/Protected';
+import Shell from './components/Shell';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import DataList from './pages/DataList';
+import DatasetPage from './pages/DatasetPage';
+import Notifications from './pages/Notifications';
+import Profile from './pages/Profile';
+import NotFound from './pages/NotFound';
 
-const NAV=[
-  {to:'/',label:'Dashboard',icon:LayoutDashboard},
-  {to:'/data',label:'Data PDRB',icon:Database},
-  {to:'/notifications',label:'Notifikasi',icon:Bell},
-  {to:'/profile',label:'Profil Saya',icon:UserCircle},
-];
-
-function Protected({children}){ return getUser()?children:<Navigate to="/login" replace/> }
-function Shell({children}){
-  const nav=useNavigate(), loc=useLocation(), user=getUser(); const [open,setOpen]=useState(false);
-  const logout=()=>{clearSession();nav('/login',{replace:true})};
-  return <div className="app-shell">
-    <aside className={`sidebar ${open?'open':''}`}>
-      <div className="brand"><div className="brand-mark">P</div><div><b>Portal PDRB</b><span>Kota Batu</span></div><button className="icon-btn mobile-close" onClick={()=>setOpen(false)}><X size={20}/></button></div>
-      <div className="role-chip"><span className="dot"/><span>{user?.role==='admin'?'Administrator':user?.institution}</span></div>
-      <nav>{NAV.map(n=>{const I=n.icon; const active=loc.pathname===n.to || (n.to==='/data'&&loc.pathname.startsWith('/data')); return <Link key={n.to} to={n.to} onClick={()=>setOpen(false)} className={active?'active':''}><I size={19}/><span>{n.label}</span>{active&&<ChevronRight size={16} className="nav-arrow"/>}</Link>})}</nav>
-      <div className="sidebar-bottom"><div className="security-note"><ShieldCheck size={18}/><div><b>Akses Terproteksi</b><span>Data instansi terisolasi</span></div></div><button className="logout" onClick={logout}><LogOut size={18}/>Keluar</button></div>
-    </aside>
-    <main className="main"><header className="topbar"><button className="icon-btn mobile-menu" onClick={()=>setOpen(true)}><Menu/></button><div className="crumb">Portal PDRB <span>/</span> {loc.pathname.startsWith('/data')?'Data PDRB':loc.pathname==='/notifications'?'Notifikasi':loc.pathname==='/profile'?'Profil Saya':'Dashboard'}</div><div className="top-user"><div className="avatar">{(user?.name||'U').slice(0,1)}</div><div><b>{user?.name}</b><span>{user?.role==='admin'?'Admin':'Akun Instansi'}</span></div></div></header><div className="content">{children}</div></main>
-  </div>
+export default function App(){
+  const location=useLocation();
+  return <AppErrorBoundary resetKey={location.key}>
+    <Routes>
+      <Route path="/" element={<Navigate to="/login" replace/>}/>
+      <Route path="/login" element={<Login/>}/>
+      <Route path="/*" element={<Protected><Shell><Routes>
+        <Route path="beranda" element={<Dashboard/>}/>
+        <Route path="data" element={<DataList/>}/>
+        <Route path="data/:id" element={<DatasetPage/>}/>
+        <Route path="notifications" element={<Notifications/>}/>
+        <Route path="profile" element={<Profile/>}/>
+        <Route path="*" element={<NotFound/>}/>
+      </Routes></Shell></Protected>}/>
+    </Routes>
+  </AppErrorBoundary>;
 }
-
-function Login(){
-  const nav=useNavigate(); const [username,setUsername]=useState(''); const [password,setPassword]=useState(''); const [err,setErr]=useState(''); const [loading,setLoading]=useState(false);
-  const submit=async e=>{e.preventDefault();setLoading(true);setErr('');try{const d=await api('/auth/login',{method:'POST',body:JSON.stringify({username,password})});setSession(d);nav('/',{replace:true})}catch(e){setErr(e.message)}finally{setLoading(false)}};
-  const demo=[['admin','Administrator'],['dinas-pertanian','Dinas Pertanian dan Ketahanan Pangan'],['diskoperindag','Diskoperindag'],['dinkes','Dinas Kesehatan'],['bapenda','Bapenda']];
-  return <div className="login-page"><div className="login-art"><div className="login-orb orb1"/><div className="login-orb orb2"/><div className="login-art-inner"><div className="brand large"><div className="brand-mark">P</div><div><b>Portal PDRB</b><span>Kota Batu</span></div></div><h1>Pengumpulan Data<br/><em>PDRB Kota Batu</em></h1><p>Satu ruang kerja terintegrasi untuk pengumpulan, pengelolaan, dan pemantauan data PDRB dari seluruh instansi.</p><div className="feature-grid"><div><Database/><span>Data berbasis Excel</span></div><div><LockKeyhole/><span>Akses per instansi</span></div><div><Activity/><span>Periode triwulanan</span></div><div><FileSpreadsheet/><span>Form dinamis</span></div></div></div></div>
-    <div className="login-card"><div className="login-card-head"><span className="eyebrow">SELAMAT DATANG</span><h2>Masuk ke Portal</h2><p>Gunakan akun instansi atau administrator.</p></div><form onSubmit={submit}><label>Username<input value={username} onChange={e=>setUsername(e.target.value)} placeholder="contoh: dinas-pertanian" autoComplete="username"/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Masukkan password" autoComplete="current-password"/></label>{err&&<div className="error-box">{err}</div>}<button className="primary-btn full" disabled={loading}>{loading?'Memproses...':'Masuk'}</button></form><div className="demo"><b>Demo cepat</b><div>{demo.map(([u,n])=><button key={u} onClick={()=>{setUsername(u);setPassword(u==='admin'?'admin123':'123456')}}>{n}</button>)}</div></div><p className="login-foot">Akun instansi hanya dapat melihat dataset milik instansinya sendiri.</p></div></div>
-}
-
-function Dashboard(){
-  const [data,setData]=useState({workbooks:[]}); const [loading,setLoading]=useState(true); const [q,setQ]=useState(''); const user=getUser();
-  useEffect(()=>{api('/workbooks').then(setData).finally(()=>setLoading(false))},[]);
-  const filtered=useMemo(()=>data.workbooks.filter(w=>`${w.file} ${w.institution} ${w.sector}`.toLowerCase().includes(q.toLowerCase())),[data,q]);
-  const stats={datasets:data.count||0,instansi:new Set(data.workbooks.map(w=>w.institution)).size,withData:data.workbooks.filter(w=>w.status==='sudah').length,periods:'2025–2026'};
-  return <div><PageIntro eyebrow={user?.role==='admin'?'ADMINISTRATOR':'RUANG KERJA INSTANSI'} title="Selamat datang di Portal PDRB" text={user?.role==='admin'?'Pantau seluruh sumber data dan aktivitas pengumpulan dari satu dashboard.':'Kelola dan lengkapi data PDRB yang menjadi tanggung jawab instansi Anda.'}/>
-    <div className="stats-grid"><Stat icon={Database} label="Dataset Terakses" value={stats.datasets}/><Stat icon={Building2} label="Instansi" value={stats.instansi}/><Stat icon={ShieldCheck} label="Sudah Terisi" value={stats.withData}/><Stat icon={Activity} label="Periode" value={stats.periods}/></div>
-    <section className="panel"><div className="panel-head"><div><span className="eyebrow">DATASET</span><h3>{user?.role==='admin'?'Seluruh Dataset':'Dataset Instansi Saya'}</h3></div><div className="toolbar"><div className="search"><Search size={17}/><input placeholder="Cari file, instansi, sektor..." value={q} onChange={e=>setQ(e.target.value)}/></div><Link to="/data" className="secondary-btn">Lihat semua</Link></div></div>
-      {loading?<Loading/>:<div className="dataset-grid">{filtered.map(w=><DatasetCard key={w.id} w={w}/>)}</div>}
-      {!loading&&!filtered.length&&<Empty title="Dataset tidak ditemukan" text="Coba ubah kata kunci pencarian."/>}
-    </section>
-  </div>
-}
-function Stat({icon:Icon,label,value}){return <div className="stat-card"><div className="stat-icon"><Icon size={20}/></div><div><span>{label}</span><strong>{value}</strong></div></div>}
-function DatasetCard({w}){return <Link to={`/data/${encodeURIComponent(w.id)}`} className="dataset-card"><div className="dataset-top"><span className="code-badge">{w.pdrbCode||'—'}</span><Status status={w.status}/></div><h4>{w.institution}</h4><p>{w.file}</p><div className="dataset-meta"><span>{w.sheetCount} sheet</span><span>{w.rows||''}</span><span>{w.sector}</span></div><div className="dataset-arrow"><ChevronRight/></div></Link>}
-function Status({status}){const map={sudah:['Sudah','green'],belum:['Belum','gray'],'on-progress':['On Progress','amber']};const [t,c]=map[status]||['Data','gray'];return <span className={`status ${c}`}>{t}</span>}
-function PageIntro({eyebrow,title,text,actions}){return <div className="page-intro"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{text}</p></div>{actions&&<div className="intro-actions">{actions}</div>}</div>}
-function Loading(){return <div className="loading"><div className="spinner"/>Memuat data...</div>}
-function Empty({title,text}){return <div className="empty"><Database size={30}/><h3>{title}</h3><p>{text}</p></div>}
-
-function DataList(){
-  const [data,setData]=useState({workbooks:[]}); const [q,setQ]=useState(''); const [status,setStatus]=useState('all'); const [sector,setSector]=useState('all');
-  useEffect(()=>{api('/workbooks').then(setData)},[]);
-  const sectors=[...new Set(data.workbooks.map(w=>w.pdrbCode).filter(Boolean))];
-  const rows=data.workbooks.filter(w=>(status==='all'||w.status===status)&&(sector==='all'||w.pdrbCode===sector)&&`${w.file} ${w.institution} ${w.sector}`.toLowerCase().includes(q.toLowerCase()));
-  return <div><PageIntro eyebrow="PENGELOLAAN DATA" title="Data PDRB" text="Setiap workbook dan sheet dipertahankan mengikuti struktur sumber Excel. Data kosong tetap kosong dan tidak dipaksa menjadi nol."/><section className="panel"><div className="filterbar"><div className="search wide"><Search size={17}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Cari dataset atau instansi..."/></div><select value={sector} onChange={e=>setSector(e.target.value)}><option value="all">Semua kode</option>{sectors.map(s=><option key={s}>{s}</option>)}</select><select value={status} onChange={e=>setStatus(e.target.value)}><option value="all">Semua status</option><option value="sudah">Sudah</option><option value="on-progress">On Progress</option><option value="belum">Belum</option></select></div><div className="table-wrap"><table className="list-table"><thead><tr><th>Kode</th><th>Instansi</th><th>Sektor</th><th>Workbook</th><th>Sheet</th><th>Status</th><th></th></tr></thead><tbody>{rows.map(w=><tr key={w.id}><td><span className="code-badge">{w.pdrbCode||'—'}</span></td><td><b>{w.institution}</b></td><td>{w.sector}</td><td>{w.file}</td><td>{w.sheetCount}</td><td><Status status={w.status}/></td><td><Link className="row-link" to={`/data/${encodeURIComponent(w.id)}`}>Buka <ChevronRight size={16}/></Link></td></tr>)}</tbody></table></div>{!rows.length&&<Empty title="Tidak ada dataset" text="Belum ada dataset yang cocok dengan filter."/>}</section></div>
-}
-
-function DatasetPage(){
-  const {id}=useParams(); const [data,setData]=useState(null); const [err,setErr]=useState(''); const [sheetIndex,setSheetIndex]=useState(0); const [tab,setTab]=useState('table'); const [editing,setEditing]=useState(false); const [saving,setSaving]=useState(false); const [q,setQ]=useState(''); const [page,setPage]=useState(1); const [uploadOpen,setUploadOpen]=useState(false); const [form,setForm]=useState({}); const [notice,setNotice]=useState('');
-  const user=getUser();
-  const load=()=>api(`/workbooks/${encodeURIComponent(id)}`).then(d=>{setData(d.workbook);setSheetIndex(0)}).catch(e=>setErr(e.message));
-  useEffect(load,[id]);
-  if(err) return <Empty title="Tidak dapat membuka dataset" text={err}/>; if(!data) return <Loading/>;
-  const sheet=data.sheets[sheetIndex]; const filteredRows=sheet.rows.map((r,i)=>({r,i})).filter(({r})=>!q||r.map(c=>displayCell(c)).join(' ').toLowerCase().includes(q.toLowerCase())); const per=25; const total=Math.max(1,Math.ceil(filteredRows.length/per)); const current=filteredRows.slice((page-1)*per,page*per);
-  const saveCell=async(si,ri,ci,v)=>{setSaving(true);try{await api(`/workbooks/${encodeURIComponent(id)}/cell`,{method:'PATCH',body:JSON.stringify({sheetIndex:si,rowIndex:ri,colIndex:ci,value:parseValue(v)})});await load();setNotice('Perubahan tersimpan');setTimeout(()=>setNotice(''),1800)}catch(e){setNotice(e.message)}finally{setSaving(false)}};
-  const addRow=async(values)=>{try{await api(`/workbooks/${encodeURIComponent(id)}/row`,{method:'POST',body:JSON.stringify({sheetIndex,values})});await load();setTab('table');setNotice('Baris baru berhasil ditambahkan');setTimeout(()=>setNotice(''),1800)}catch(e){setNotice(e.message)}};
-  const upload=async(file)=>{const fd=new FormData();fd.append('file',file);fd.append('institution',user.role==='admin'?data.institution:user.institution);try{await api('/upload',{method:'POST',body:fd});setUploadOpen(false);setNotice('File berhasil diimpor sebagai dataset baru');setTimeout(()=>setNotice(''),2200)}catch(e){setNotice(e.message)}};
-  return <div>
-    <div className="breadcrumb"><Link to="/data">Data PDRB</Link><ChevronRight size={15}/><span>{data.institution}</span><ChevronRight size={15}/><b>{data.file}</b></div>
-    <PageIntro eyebrow={`${data.pdrbCode||'UPLOAD'} · ${data.sector}`} title={data.institution} text={data.file} actions={<><Status status={data.status}/>{(user.role==='admin'||user.institution===data.institution)&&<button className="secondary-btn" onClick={()=>setUploadOpen(true)}><Upload size={16}/> Import Excel</button>}</>}/>
-    <div className="dataset-header panel"><div className="dataset-info"><div className="big-code">{data.pdrbCode||'—'}</div><div><span>Workbook sumber</span><b>{data.file}</b><small>{data.sheets.length} sheet · akses {user.role==='admin'?'administrator':data.institution}</small></div></div><div className="permission"><ShieldCheck size={17}/><span>{user.role==='admin'?'Admin dapat melihat seluruh instansi':'Anda hanya melihat data instansi sendiri'}</span></div></div>
-    <section className="panel data-panel"><div className="sheet-tabs">{data.sheets.map((s,i)=><button key={s.id} className={i===sheetIndex?'active':''} onClick={()=>{setSheetIndex(i);setPage(1);setQ('');setTab('table')}}>{s.name}</button>)}</div><div className="panel-head compact"><div><h3>{sheet.name}</h3><p>{sheet.maxRow} baris · {sheet.maxCol} kolom · struktur sumber dipertahankan</p></div><div className="toolbar"><div className="search"><Search size={16}/><input value={q} onChange={e=>{setQ(e.target.value);setPage(1)}} placeholder="Cari isi sheet..."/></div><div className="segmented"><button className={tab==='table'?'active':''} onClick={()=>setTab('table')}>Tabel Excel</button><button className={tab==='form'?'active':''} onClick={()=>setTab('form')}>Input Baru</button></div></div></div>
-      {tab==='table'?<><div className="table-actions"><span>{editing?'Mode edit aktif — klik Simpan pada cell setelah perubahan.':'Mode baca — data asli dapat diedit oleh pemilik instansi.'}</span><button className={editing?'primary-btn':'secondary-btn'} onClick={()=>setEditing(!editing)}>{editing?<><Save size={16}/> Selesai Edit</>:<>Edit Data</>}</button></div><ExcelTable sheet={sheet} sheetIndex={sheetIndex} rows={current} editing={editing} onSave={saveCell}/><div className="pagination"><span>Menampilkan {(page-1)*per+1}–{Math.min(page*per,filteredRows.length)} dari {filteredRows.length} baris</span><div><button disabled={page<=1} onClick={()=>setPage(p=>p-1)}>Sebelumnya</button><b>{page} / {total}</b><button disabled={page>=total} onClick={()=>setPage(p=>p+1)}>Berikutnya</button></div></div></>:<NewRowForm sheet={sheet} onAdd={addRow}/>}</section>
-    {uploadOpen&&<UploadModal institution={data.institution} onClose={()=>setUploadOpen(false)} onUpload={upload}/>} {notice&&<div className="toast">{notice}</div>}{saving&&<div className="saving">Menyimpan...</div>}
-  </div>
-}
-function ExcelTable({sheet,sheetIndex,rows,editing,onSave}){return <div className="excel-wrap"><table className="excel-table"><tbody>{rows.map(({r,i})=><tr key={i}><td className="rownum">{i+1}</td>{r.map((c,ci)=><td key={ci}>{editing?<CellEditor cell={c} onSave={v=>onSave(sheetIndex,i,ci,v)}/>:<CellValue cell={c}/>}</td>)}</tr>)}</tbody></table></div>}
-function CellEditor({cell,onSave}){const [v,setV]=useState(displayCell(cell));return <input className="cell-input" value={v} onChange={e=>setV(e.target.value)} onBlur={()=>{if(v!==displayCell(cell))onSave(v)}} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur()}}/>}
-function CellValue({cell}){const v=displayCell(cell);return <span className={cell?.t==='formula'?'formula-cell':cell?.t==='error'?'error-cell':''} title={cell?.t==='formula'?`Formula: ${v}`:undefined}>{v}</span>}
-function displayCell(c){if(c===null||c===undefined)return ''; if(typeof c==='object')return c.v===null||c.v===undefined?'':String(c.v); return String(c)}
-function parseValue(v){if(v==='')return ''; if(/^[-+]?\d+(\.\d+)?$/.test(v.trim()))return Number(v); return v}
-function headerRowIndex(sheet){let best=0,score=-1; for(let i=0;i<Math.min(sheet.rows.length,35);i++){const n=sheet.rows[i].filter(Boolean).length; const text=sheet.rows[i].filter(x=>x).map(displayCell).join(' ').toLowerCase(); const bonus=(text.includes('tw')||text.includes('triwulan')||text.includes('uraian')||text.includes('komoditas')||text.includes('nama unit')||text.includes('sektor')||text.includes('kode rekening'))?4:0; if(n+bonus>score){score=n+bonus;best=i}} return best}
-function NewRowForm({sheet,onAdd}){const defaultHeader=headerRowIndex(sheet);const [header,setHeader]=useState(defaultHeader);const [values,setValues]=useState(()=>Array(sheet.maxCol).fill('')); const labels=sheet.rows[header]||[]; const submit=e=>{e.preventDefault();onAdd(values)}; return <div className="form-builder"><div className="form-builder-head"><div><span className="eyebrow">FORM DINAMIS</span><h3>Tambah data baru</h3><p>Form dibuat langsung dari struktur kolom pada sheet Excel. Data kosong boleh dibiarkan kosong.</p></div><label className="header-select">Baris acuan<select value={header} onChange={e=>{setHeader(Number(e.target.value));setValues(Array(sheet.maxCol).fill(''))}}>{sheet.rows.slice(0,35).map((r,i)=><option key={i} value={i}>Baris {i+1}: {r.filter(Boolean).slice(0,4).map(displayCell).join(' · ')||'(kosong)'}</option>)}</select></label></div><form onSubmit={submit}><div className="dynamic-form">{Array.from({length:sheet.maxCol},(_,i)=><label key={i}><span>{displayCell(labels[i])||`Kolom ${i+1}`}</span><input value={values[i]||''} onChange={e=>setValues(v=>{const n=[...v];n[i]=e.target.value;return n})} placeholder="Kosong bila belum ada data"/></label>)}</div><div className="form-actions"><button type="button" className="secondary-btn" onClick={()=>setValues(Array(sheet.maxCol).fill(''))}>Reset</button><button className="primary-btn"><Plus size={16}/> Tambahkan baris</button></div></form></div>}
-function UploadModal({institution,onClose,onUpload}){const [file,setFile]=useState(null);return <div className="modal-backdrop"><div className="modal"><button className="modal-close" onClick={onClose}><X/></button><span className="eyebrow">IMPORT DATA</span><h2>Upload Excel</h2><p>File akan dibaca sebagai workbook baru. Struktur sheet dan nilai akan dipertahankan.</p><div className="upload-drop"><Upload size={30}/><b>{file?file.name:'Pilih file .xlsx / .xls'}</b><span>Instansi tujuan: {institution}</span><input type="file" accept=".xlsx,.xls" onChange={e=>setFile(e.target.files?.[0]||null)}/></div><div className="form-actions"><button className="secondary-btn" onClick={onClose}>Batal</button><button className="primary-btn" disabled={!file} onClick={()=>onUpload(file)}>Import</button></div></div></div>}
-
-function Notifications(){
-  const user=getUser();
-  const [items,setItems]=useState([]);
-  useEffect(()=>{api('/notifications').then(d=>setItems(d.audit||[]));},[]);
-  return <div><PageIntro eyebrow="PUSAT INFORMASI" title="Notifikasi" text="Aktivitas perubahan data dan informasi akses ditampilkan di sini."/><section className="panel"><div className="panel-head"><div><h3>{user.role==='admin'?'Audit perubahan':'Aktivitas instansi'}</h3><p>{user.role==='admin'?'Riwayat edit, tambah baris, dan upload seluruh instansi.':'Hanya aktivitas yang terkait akun atau dataset instansi Anda.'}</p></div></div>{items.length?<div className="activity-list">{items.map((x,i)=><div className="activity" key={i}><div className="activity-icon"><Activity size={17}/></div><div><b>{x.action}</b><span>{x.user} · {x.details?.workbook||''} {x.details?.sheet?`· ${x.details.sheet}`:''}</span></div><time>{new Date(x.at).toLocaleString('id-ID')}</time></div>)}</div>:<Empty title="Belum ada aktivitas" text="Aktivitas akan muncul setelah ada perubahan pada dataset yang dapat Anda akses."/>}</section></div>
-}
-function Profile(){const u=getUser();return <div><PageIntro eyebrow="AKUN" title="Profil Saya" text="Informasi akun dan batas akses saat ini."/><div className="profile-grid"><section className="panel profile-card"><div className="profile-avatar">{u?.name?.slice(0,1)}</div><h2>{u?.name}</h2><span className="status green">{u?.role==='admin'?'Administrator':'Akun Instansi'}</span><div className="profile-info"><div><span>Username</span><b>{u?.username}</b></div><div><span>Instansi</span><b>{u?.institution||'Semua instansi'}</b></div><div><span>Akses</span><b>{u?.role==='admin'?'Seluruh dataset':'Dataset milik instansi sendiri'}</b></div></div></section><section className="panel"><h3>Aturan akses</h3><ul className="rule-list"><li><ShieldCheck/>Admin dapat melihat seluruh workbook.</li><li><LockKeyhole/>Akun instansi dibatasi server berdasarkan institution.</li><li><FileSpreadsheet/>Form input mengikuti kolom sheet yang dipilih.</li><li><Database/>Nilai kosong tetap kosong; tidak diubah otomatis menjadi 0.</li></ul></section></div></div>}
-
-export default function App(){return <Routes><Route path="/login" element={<Login/>}/><Route path="/*" element={<Protected><Shell><Routes><Route index element={<Dashboard/>}/><Route path="data" element={<DataList/>}/><Route path="data/:id" element={<DatasetPage/>}/><Route path="notifications" element={<Notifications/>}/><Route path="profile" element={<Profile/>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></Shell></Protected>}/></Routes>}
