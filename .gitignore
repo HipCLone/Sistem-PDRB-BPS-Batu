@@ -5,3 +5,8 @@ backend/data/db.json
 *.log
 backend/data/uploads/
 .local-backups/
+.env
+.env.*
+!.env.example
+backend/data/*.tmp
+backend/data/jwt-secret

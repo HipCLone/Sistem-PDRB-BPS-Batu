@@ -2,6 +2,10 @@
 
 Diperiksa pada 6 Oktober 2026. Antislop during memakai skill lokal yang relevan sesuai AGENTS.md. Arah desain dan alasan keputusan tercatat di [design.md](design.md).
 
+Pembaruan 9 Oktober 2026: runtime telah dipindahkan ke PostgreSQL schema `pdrb`. Laporan di bawah mempertahankan bukti desain/regresi awal; rincian migrasi, hasil server, dan batas pengujian terbaru ada di [postgresql.md](postgresql.md). Tidak ada perubahan komponen atau CSS pada migrasi ini.
+
+Verifikasi ulang 9 Oktober: 20 tes unit/API/SQL lulus, 66 pemeriksaan browser terisolasi lulus, build lulus, 124 tabel lulus render, dan `git diff --check` lulus. API PostgreSQL server dibandingkan dengan snapshot JSON untuk seluruh 24 akun dan 39 dataset aktif; hasil cocok. Import ulang sumber yang sama tidak menduplikasi data. Pesan `Transaksi PostgreSQL gagal: XX001` pada tes merupakan kegagalan SQL yang sengaja disimulasikan untuk membuktikan HTTP 503 dan rollback, bukan kegagalan suite.
+
 ## Hasil pengujian
 
 - `npm test`: 17 pengujian lulus, termasuk judul seluruh dataset sumber, pembacaan merge/rumus/nol, filter, akses API, validasi perubahan, CRUD admin, edit nilai instansi sendiri, pengisian kembali baris yang dikosongkan, ID upload unik, penolakan edit/struktur Bapenda, penerima notifikasi, penolakan membaca notifikasi akun lain, kedatangan pesan bersamaan dengan Tandai semua dibaca, dan persistensi setelah backend dimulai ulang.
@@ -57,7 +61,7 @@ Status PASS berikut merujuk pada source UI, audit, pemeriksaan kontras, dan alur
 - R-33 PASS: perubahan source menggunakan apply_patch, bukan skrip penggantian string/CSS.
 - R-34 PASS: hanya satu tema terang; tidak ada toggle dengan tema yang belum dibuat.
 - R-35 PASS: build, unit/API, audit sumber, render seluruh tabel, dan click-through Chrome dijalankan; hasil dan screenshot disimpan.
-- R-36 PASS: batasan JWT development, database JSON lokal, dan perhitungan formula tetap dijelaskan di README; tidak mengklaim production-ready.
+- R-36 PASS: batasan password demo, kredensial/tunnel lokal, role database bersama, backup operasional, serta perhitungan formula dijelaskan di README dan laporan PostgreSQL; tidak mengklaim production-ready.
 - R-37 PASS: brief dan ENERGY 1 / RHYTHM 2 / MOTION 1 tercatat sebelum perombakan UI.
 - R-38 PASS: isi berasal dari Excel/API/akun lokal. Akun pengujian diberi label lokal; data browser hanya dibuat dalam database pengujian.
 
@@ -107,4 +111,4 @@ Status PASS berikut merujuk pada source UI, audit, pemeriksaan kontras, dan alur
 
 20 skrip diagnostik/persiapan root dihapus setelah ZIP diperiksa berisi semua file. Pemulihan: ekstrak `.local-backups/cleanup-2026-10-06.zip`. Source Excel, seed, database pengguna, lockfile, dan skill lokal tidak dihapus.
 
-Rumus tanpa cached value tidak dihitung otomatis oleh web dan tidak diganti nol. Bapenda boleh upload, tetapi tidak mengedit struktur/nilai. Ini implementasi lokal dengan database JSON; deployment production, penggantian password demo, rate limiting, backup operasional, dan database multiuser tetap memerlukan pekerjaan tersendiri.
+Rumus tanpa cached value tidak dihitung otomatis oleh web dan tidak diganti nol. Bapenda boleh upload, tetapi tidak mengedit struktur/nilai. Runtime sekarang memakai PostgreSQL; deployment production, penggantian password demo, HTTPS, rate limiting, dan backup operasional tetap memerlukan pekerjaan tersendiri.

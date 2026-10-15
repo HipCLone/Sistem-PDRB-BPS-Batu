@@ -9,23 +9,32 @@
     "build": "vite build",
     "start": "node backend/server.js",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test scripts/excel-presentation.test.mjs scripts/api.test.mjs",
+    "test": "node --test scripts/excel-presentation.test.mjs scripts/api.test.mjs scripts/database.test.mjs",
+    "db:check": "node scripts/database.cjs check",
+    "db:migrate": "node scripts/database.cjs migrate",
+    "db:import": "node scripts/database.cjs import",
+    "db:verify": "node scripts/database.cjs verify",
+    "db:inventory": "node scripts/database.cjs inventory",
+    "test:postgres": "node scripts/postgres-smoke.cjs",
     "audit:excel": "node scripts/audit-excel.mjs --report",
     "test:tables": "node scripts/check-table-render.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
+    "dotenv": "^18.0.6",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.468.0",
     "multer": "^2.0.2",
+    "pg": "^8.23.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-router-dom": "^7.9.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@vitejs/plugin-react": "^5.0.4",
     "concurrently": "^9.2.1",
     "vite": "^7.1.7"

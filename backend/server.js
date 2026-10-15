@@ -12,6 +12,7 @@ const periodsModule=import('../src/lib/periods.mjs');
 const labelsModule=import('../src/lib/datasetLabels.mjs');
 
 function createApp(options={}) {
+if(!options.storage&&!options.dataDir)throw new Error('Penyimpanan PostgreSQL wajib untuk runtime. JSON hanya tersedia pada pengujian terisolasi.');
 const JWT_SECRET = options.secret || process.env.JWT_SECRET || 'pdrb-local-development-secret-change-me';
 const ROOT = __dirname;
 const DATA_DIR = options.dataDir || process.env.PDRB_DATA_DIR || path.join(ROOT, 'data');
@@ -21,7 +22,7 @@ const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const seed = JSON.parse(fs.readFileSync(SEED_PATH, 'utf8'));
+const seed = options.storage?.seed || JSON.parse(fs.readFileSync(SEED_PATH, 'utf8'));
 
 const institutionUsers = [
   ['admin','admin123','Administrator','admin'],
@@ -66,8 +67,9 @@ function loadDb() {
   }
   return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
 }
-let db = loadDb();
+const db = options.storage?.db || loadDb();
 function saveDb(){
+  if(options.storage){options.storage.markDirty();return;}
   const pending=DB_PATH+'.tmp';
   fs.writeFileSync(pending,JSON.stringify(db,null,2));
   fs.renameSync(pending,DB_PATH);
@@ -132,7 +134,8 @@ function applyOverrides(wb){
   copy.sheets.forEach((sheet,si)=>{sheet.maxRow=sheet.rows.length;sheet.tableState=db.tableState?.[wb.id]?.[si]||{};sheet.editedRows=db.editedRows?.[wb.id]?.[si]||[];});
   return copy;
 }
-const metadataCache=new Map();
+const localMetadataCache=new Map();
+const metadataCache=options.storage?new Proxy({}, {get:(_,name)=>{const cache=options.storage.cache();const value=cache[name];return typeof value==='function'?value.bind(cache):value;}}):localMetadataCache;
 async function meta(w){
   if(metadataCache.has(w.id))return metadataCache.get(w.id);
   const {detectBlocks}=await presentation;
@@ -181,9 +184,10 @@ function tableState(wb,si,tableId){
 const app=express();
 app.use(cors());
 app.use(express.json({limit:'20mb'}));
+if(options.storage)app.use('/api',options.storage.middleware());
 const upload=multer({dest:UPLOAD_DIR,limits:{fileSize:25*1024*1024}});
 
-app.get('/api/health',(req,res)=>res.json({ok:true,service:'pdrb-local-api',workbooks:allWorkbooks().length}));
+app.get('/api/health',(req,res)=>res.json({ok:true,service:'pdrb-local-api',storage:options.storage?.kind||'json-test',schema:options.storage?'pdrb':null,workbooks:allWorkbooks().length}));
 app.post('/api/auth/login',(req,res)=>{
   const {username,password}=req.body||{};
   const user=db.users.find(u=>u.username===username);
@@ -403,4 +407,19 @@ if(fs.existsSync(dist)){ app.use(express.static(dist)); app.use((req,res)=>req.m
 return app;
 }
 module.exports={createApp};
-if(require.main===module){const port=process.env.PORT||8787;createApp().listen(port,'127.0.0.1',()=>console.log(`PDRB API running at http://127.0.0.1:${port}`));}
+async function start(){
+  const {createPool,jwtSecret}=require('./database/config');
+  const {createPostgresStorage}=require('./database/storage');
+  const pool=createPool(),storage=createPostgresStorage(pool);
+  try{
+    await storage.transaction(false,()=>{});
+    const port=process.env.PORT||5012,host=process.env.HOST||'127.0.0.1';
+    const server=createApp({storage,secret:jwtSecret()}).listen(port,host,()=>console.log(`PDRB API running at http://${host}:${server.address().port} (PostgreSQL, schema pdrb)`));
+    server.on('error',async error=>{console.error('API gagal dijalankan:',error.code);await pool.end();process.exitCode=1;});
+    const shutdown=()=>{server.close(async()=>{await pool.end();process.exit(0);});};
+    process.once('SIGINT',shutdown);process.once('SIGTERM',shutdown);
+    return server;
+  }catch(error){await pool.end();throw error;}
+}
+module.exports.start=start;
+if(require.main===module)start().catch(error=>{console.error('Backend gagal dijalankan:',error.code||error.message);process.exitCode=1;});
