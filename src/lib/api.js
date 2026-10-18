@@ -12,7 +12,7 @@ export async function api(path, options={}){
   const data=await res.json().catch(()=>({}));
   if(!res.ok){
     if(res.status===401&&path!=='/auth/login'){clearSession();window.dispatchEvent(new Event('pdrb-session-expired'));}
-    const error=new Error(data.message||'Data belum dapat diproses. Coba lagi.');error.status=res.status;throw error;
+    const error=new Error(data.message||'Data belum dapat diproses. Coba lagi.');error.status=res.status;error.code=data.code;error.change=data.change;throw error;
   }
   if(options.method&&options.method!=='GET'&&!path.startsWith('/auth/')&&!path.startsWith('/notifications'))window.dispatchEvent(new Event('pdrb-data-changed'));
   return data;

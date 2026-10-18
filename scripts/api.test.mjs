@@ -7,8 +7,74 @@ import {createRequire} from 'node:module';
 import {detectBlocks} from '../src/lib/sheetPresentation.mjs';
 import {parsePeriod,matchesPeriod,filterBlockPeriod} from '../src/lib/periods.mjs';
 import {datasetTitle,sheetLabel} from '../src/lib/datasetLabels.mjs';
+import {assessDrasticChange} from '../src/lib/drasticChanges.mjs';
 const require=createRequire(import.meta.url),{createApp}=require('../backend/server.js');
 const XLSX=require('xlsx'),{readSheets}=require('../backend/import-workbook.js');
+
+test('drastic changes use exact preceding periods and matching measures, not neighbouring columns',()=>{
+  const make=(columns,rows)=>({id:'test',institution:'BULOG',file:'test.xlsx',sheets:[{name:'Stok',manualHeaders:true,rows:[columns,...rows],maxCol:columns.length,maxRow:rows.length+1,mergedRanges:[]}]});
+  const w=make(['Indikator','2025 Triwulan IV Volume','2025 Triwulan IV Rupiah','2026 Triwulan I Volume','2026 Triwulan I Rupiah'],[['Beras',100,1000,null,null]]);
+  const assess=value=>assessDrasticChange(w,{sheetIndex:0,rowIndex:1,colIndex:3,value});
+  assert.equal(assess(200).direction,'increase');assert.equal(assess(50).direction,'decrease');assert.equal(assess(0).percentage,-100);
+  assert.equal(assess('200').previous.value,100);assert.equal(assess(199.99),null);assert.equal(assess(50.01),null);
+  assert.equal(assessDrasticChange(w,{sheetIndex:0,rowIndex:1,colIndex:4,value:500}).previous.value,1000);
+  assert.equal(assessDrasticChange(make(['Indikator','2025 Triwulan I','2025 Triwulan III'],[['Beras',100,null]]),{sheetIndex:0,rowIndex:1,colIndex:2,value:200}),null);
+  for(const previous of [0,null,-100,{t:'formula',v:'B2',calc:null}]){
+    assert.equal(assessDrasticChange(make(['Indikator','2025','2026'],[['Beras',previous,null]]),{sheetIndex:0,rowIndex:1,colIndex:2,value:200}),null);
+  }
+  const annual=make(['Tahun','Nilai'],[[2025,100],[2026,null]]);
+  assert.equal(assessDrasticChange(annual,{sheetIndex:0,rowIndex:2,colIndex:1,value:200}).previous.value,100);
+  const monthly=make(['Indikator','Nilai 2026'],[['Beras',100]]);monthly.sheets[0].name='Januari';
+  monthly.sheets.push({...structuredClone(monthly.sheets[0]),name:'Februari',rows:[['Indikator','Nilai 2026'],['Beras',null]]});
+  assert.equal(assessDrasticChange(monthly,{sheetIndex:1,rowIndex:1,colIndex:1,value:200}).previous.period,'2026 Bulan 1');
+  const other=structuredClone(monthly);other.id='duplicate';
+  assert.equal(assessDrasticChange(monthly,{sheetIndex:1,rowIndex:1,colIndex:1,value:200},[monthly,other]),null);
+  const last=make(['Indikator','Realisasi 2025'],[['Beras',100]]);last.id='last';last.file='LRA 2025 TW 4.xlsx';
+  const next=make(['Indikator','Realisasi 2026'],[['Beras',null]]);next.file='LRA 2026 TW 1.xlsx';
+  assert.equal(assessDrasticChange(next,{sheetIndex:0,rowIndex:1,colIndex:1,value:200},[last,next]).previous.period,'2025 Triwulan 4');
+  last.institution='Bapenda';assert.equal(assessDrasticChange(next,{sheetIndex:0,rowIndex:1,colIndex:1,value:200},[last,next]),null);
+});
+
+test('institution drastic edits require a current explanation and persist audit plus admin notification',async()=>{
+  const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'pdrb-drastic-api-'));
+  const server=createApp({dataDir,secret:'drastic-test-secret'}).listen(0,'127.0.0.1');
+  await new Promise(resolve=>server.on('listening',resolve));
+  const base=`http://127.0.0.1:${server.address().port}/api`;
+  const call=async(url,token,body,method=body?'POST':'GET')=>{
+    const r=await fetch(base+url,{method,headers:{Authorization:`Bearer ${token||''}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+    return {status:r.status,data:await r.json()};
+  };
+  try{
+    const admin=(await call('/auth/login',null,{username:'admin',password:'admin123'})).data.token;
+    const bulog=(await call('/auth/login',null,{username:'bulog',password:'123456'})).data.token;
+    const created=await call('/workbooks',admin,{title:'Uji perubahan drastis',institution:'BULOG',table:{label:'Stok',columns:['Indikator','2025 Triwulan IV','2026 Triwulan I'],rowLabels:['Beras']}});
+    assert.equal(created.status,201);
+    const url='/workbooks/'+created.data.workbook.id,edit={sheetIndex:0,rowIndex:1,colIndex:2,value:200};
+    assert.equal((await call(url+'/cell',admin,{...edit,colIndex:1,value:100},'PATCH')).status,200);
+    const before=(await call('/notifications',admin)).data;
+    let attempt=await call(url+'/cell',bulog,edit,'PATCH');assert.equal(attempt.status,422);
+    assert.equal(attempt.data.code,'DRASTIC_CHANGE_REASON_REQUIRED');assert.equal(attempt.data.change.previous.value,100);
+    assert.equal((await call(url,bulog)).data.workbook.sheets[0].rows[1][2],null);
+    assert.equal((await call('/notifications',admin)).data.audit.length,before.audit.length);
+    const oldToken=attempt.data.change.comparisonToken;
+    assert.equal((await call(url+'/cell',bulog,{...edit,reason:'   ',comparisonToken:oldToken},'PATCH')).status,422);
+    assert.equal((await call(url+'/cell',bulog,{...edit,reason:'x'.repeat(2001),comparisonToken:oldToken},'PATCH')).status,422);
+    await call(url+'/cell',admin,{...edit,colIndex:1,value:90},'PATCH');
+    attempt=await call(url+'/cell',bulog,{...edit,reason:'Permintaan meningkat',comparisonToken:oldToken},'PATCH');assert.equal(attempt.status,422);
+    assert.notEqual(attempt.data.change.comparisonToken,oldToken);
+    const reason='Permintaan meningkat karena panen';
+    assert.equal((await call(url+'/cell',bulog,{...edit,reason,comparisonToken:attempt.data.change.comparisonToken},'PATCH')).status,200);
+    const history=(await call('/notifications',admin)).data;
+    assert.equal(history.audit[0].details.drasticChange.reason,reason);assert.equal(history.audit[0].details.drasticChange.previous.value,90);
+    assert.equal(history.notifications[0].title,'Perubahan data drastis');assert(history.notifications[0].message.includes(reason));
+    assert.equal((await call('/notifications',bulog)).data.audit[0].details.drasticChange.reason,reason);
+    assert.equal((await call(url+'/cell',bulog,{...edit,value:45},'PATCH')).data.change.direction,'decrease');
+    assert.equal((await call(url+'/cell',bulog,{...edit,value:'300'},'PATCH')).status,422);
+    assert.equal((await call(url+'/cell',admin,{...edit,value:1000},'PATCH')).status,200);
+    const persisted=JSON.parse(fs.readFileSync(path.join(dataDir,'db.json'),'utf8'));
+    assert(persisted.audit.some(a=>a.details.drasticChange?.reason===reason));
+  }finally{await new Promise(resolve=>server.close(resolve));}
+});
 
 test('all source datasets have readable titles without filenames',()=>{
   const seed=JSON.parse(fs.readFileSync(new URL('../backend/data/workbooks.json',import.meta.url),'utf8'));

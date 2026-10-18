@@ -4,9 +4,9 @@ import { api, getUser } from '../lib/api';
 import { parseValue, periodLabel } from '../lib/format';
 import { datasetTitle, sheetLabel } from '../lib/datasetLabels.mjs';
 import { detectBlocks } from '../lib/sheetPresentation.mjs';
-import { filterBlockPeriod } from '../lib/periods.mjs';
+import { filterBlockPeriod, withNamedColumns } from '../lib/periods.mjs';
 import CleanDataTable from '../components/CleanDataTable';
-import { RowModal, ColumnModal, TemplateModal, DatasetManageModal, TableManageModal, DeleteModal } from '../components/modals';
+import { RowModal, ColumnModal, TemplateModal, DatasetManageModal, TableManageModal, DeleteModal, DrasticChangeModal } from '../components/modals';
 import { Empty, Loading, PageIntro, RouteFeedback } from '../components/ui';
 
 export default function DatasetPage(){
@@ -14,6 +14,8 @@ export default function DatasetPage(){
   const [data,setData]=useState(null),[error,setError]=useState(''),[loading,setLoading]=useState(true);
   const [version,setVersion]=useState(0),[editing,setEditing]=useState(null),[modal,setModal]=useState(null),[notice,setNotice]=useState('');
   const request=useRef(0),user=getUser(),isAdmin=user?.role==='admin',canEdit=!!user&&(isAdmin||user.institution!=='Bapenda');
+  const pendingChange=useRef(null);
+  useEffect(()=>()=>{pendingChange.current?.reject(new Error('Nilai belum disimpan.'));pendingChange.current=null;},[id]);
   useEffect(()=>{const controller=new AbortController(),current=++request.current;setLoading(true);setError('');
     api(`/workbooks/${encodeURIComponent(id)}`,{signal:controller.signal}).then(result=>{if(current===request.current)setData(result.workbook||result);}).catch(e=>{if(e.name!=='AbortError'&&current===request.current)setError(e.message);}).finally(()=>{if(current===request.current)setLoading(false);});
     return()=>controller.abort();
@@ -28,6 +30,17 @@ export default function DatasetPage(){
   const change=(key,value)=>{const next=new URLSearchParams(params);value==='all'?next.delete(key):next.set(key,value);if(key==='bagian'){for(const key of [...next.keys()])if(key.startsWith('halaman-'))next.delete(key);setEditing(null);}setParams(next,{replace:true});};
   const reload=()=>setVersion(v=>v+1);
   const mutate=async(path,body)=>{await api(`/workbooks/${encodeURIComponent(id)}/${path}`,{method:path==='cell'?'PATCH':'POST',body:JSON.stringify(body)});reload();};
+  const saveCell=async(si,rowIndex,colIndex,value)=>{
+    setNotice('');
+    const body={sheetIndex:si,rowIndex,colIndex,value:parseValue(value)};
+    try{await mutate('cell',body);}catch(error){
+      if(error.code!=='DRASTIC_CHANGE_REASON_REQUIRED')throw error;
+      if(pendingChange.current)throw new Error('Selesaikan alasan perubahan sel sebelumnya terlebih dahulu.');
+      await new Promise((resolve,reject)=>{pendingChange.current={resolve,reject};setModal({kind:'drastic',body,change:error.change});});
+    }
+    setNotice('Perubahan sel tersimpan.');
+  };
+  const cancelChange=()=>{const pending=pendingChange.current;pendingChange.current=null;setModal(null);pending?.reject(new Error('Nilai belum disimpan. Isi alasan atau kembalikan nilai sel.'));};
   const manageTable=async(block,body)=>{await api(`/workbooks/${encodeURIComponent(id)}/table`,{method:'PATCH',body:JSON.stringify({sheetIndex,tableId:block.id,...body})});setModal(null);setEditing(null);reload();setNotice('Tabel berhasil diperbarui.');};
   const backFilters=new URLSearchParams();for(const key of ['tahun','triwulan','instansi'])if(params.has(key))backFilters.set(key,params.get(key));
   const back=location.state?.from||('/data'+(backFilters.size?'?'+backFilters.toString():''));
@@ -50,12 +63,12 @@ export default function DatasetPage(){
     {!blocks.length&&<Empty title="Bagian ini belum berisi tabel" text="Pilih bagian data lain atau kembali ke daftar berkas."/>}
     {blocks.map(source=>{
       const active=editing===source.id;
-      const block=active?{...source,columns:source.schemaColumns,labels:source.schemaLabels,headerPaths:source.schemaPaths,rowIndexes:[...new Set([...source.rowIndexes,...source.editableRowIndexes])].sort((a,b)=>a-b)}:filterBlockPeriod(source,year,quarter,data.periodYear);
+      const block=active?{...source,columns:source.schemaColumns,labels:source.schemaLabels,headerPaths:source.schemaPaths,rowIndexes:[...new Set([...source.rowIndexes,...source.editableRowIndexes])].sort((a,b)=>a-b)}:filterBlockPeriod(withNamedColumns(source),year,quarter,data.periodYear);
       const pageKey=`halaman-${source.id}`,total=Math.max(1,Math.ceil(block.rowIndexes.length/40)),page=Math.min(total,Math.max(1,Math.floor(Number(params.get(pageKey)))||1));
       const rows=block.rowIndexes.slice((page-1)*40,page*40).map(index=>({row:sheet.rows[index],index}));
       return <section className="panel dataset-table" key={source.id} data-table-id={source.id}>
         <div className="dataset-heading"><h2>{source.label}</h2>{canEdit&&<div className="table-actions">{isAdmin&&<><button className="secondary-btn" disabled={loading} onClick={()=>setModal({kind:'row',block:source})}>Tambah baris</button><button className="secondary-btn" disabled={loading} onClick={()=>setModal({kind:'column',block:source})}>Tambah kolom</button><button className="secondary-btn" disabled={loading} onClick={()=>setModal({kind:'manage',block:source})}>Kelola tabel</button></>}<button className={active?'primary-btn':'secondary-btn'} onClick={()=>setEditing(active?null:source.id)}>{active?'Selesai edit':'Edit data'}</button></div>}</div>
-        {block.columns.length?<CleanDataTable sheet={sheet} sheetIndex={sheetIndex} block={block} rows={rows} editing={active} onDeleteRow={isAdmin?r=>setModal({kind:'delete',block:source,operation:{kind:'deleteRow',rowIndex:r},label:`baris ${r+1}`}):undefined} onSave={async(si,rowIndex,colIndex,value)=>{setNotice('');await mutate('cell',{sheetIndex:si,rowIndex,colIndex,value:parseValue(value)});setNotice('Perubahan sel tersimpan.');}}/>:<Empty title="Nilai belum tersedia" text={canEdit?'Tekan Edit data untuk mengisi kolom kosong. Admin dapat menambahkan struktur tabel.':'Kolom yang belum diisi tidak ditampilkan. Bapenda dapat mengunggah berkas melalui halaman Data PDRB.'}/>}
+        {block.columns.length?<CleanDataTable sheet={sheet} sheetIndex={sheetIndex} block={block} rows={rows} editing={active} onDeleteRow={isAdmin?r=>setModal({kind:'delete',block:source,operation:{kind:'deleteRow',rowIndex:r},label:`baris ${r+1}`}):undefined} onSave={saveCell}/>:<Empty title="Kolom belum tersedia" text={canEdit?'Ubah filter periode atau tekan Edit data untuk memeriksa struktur tabel.':'Tidak ada kolom yang dapat ditampilkan untuk pilihan ini. Ubah filter periode atau hubungi admin.'}/>}
         {total>1&&<div className="pagination" aria-label={`Halaman tabel ${source.label}`}><span>Halaman {page} dari {total}</span><div><button className="secondary-btn" disabled={page===1} onClick={()=>change(pageKey,String(page-1))}>Sebelumnya</button><button className="secondary-btn" disabled={page===total} onClick={()=>change(pageKey,String(page+1))}>Berikutnya</button></div></div>}
       </section>;
     })}
@@ -66,5 +79,10 @@ export default function DatasetPage(){
     {modal?.kind==='manage'&&<TableManageModal block={modal.block} onClose={()=>setModal(null)} onSubmit={body=>manageTable(modal.block,body)} onDelete={operation=>setModal({kind:'delete',block:modal.block,operation,label:operation.label})}/>}
     {modal?.kind==='delete'&&<DeleteModal title="Konfirmasi penghapusan" description={`Hapus ${modal.label} dari tabel ${modal.block.label}?`} onClose={()=>setModal(null)} onSubmit={()=>manageTable(modal.block,modal.operation)}/>}
     {modal?.kind==='deleteDataset'&&<DeleteModal title="Hapus dataset?" description={`Seluruh tabel pada ${datasetTitle(data)} akan dihapus dari daftar aktif.`} onClose={()=>setModal(null)} onSubmit={async()=>{await api(`/workbooks/${encodeURIComponent(id)}`,{method:'DELETE'});navigate(back,{replace:true});}}/>}
+    {modal?.kind==='drastic'&&<DrasticChangeModal change={modal.change} onClose={cancelChange} onSubmit={async reason=>{
+      try{await mutate('cell',{...modal.body,reason,comparisonToken:modal.change.comparisonToken});}
+      catch(error){if(error.change)setModal(current=>({...current,change:error.change}));throw error;}
+      const pending=pendingChange.current;pendingChange.current=null;setModal(null);pending?.resolve();
+    }}/>}
   </>;
 }

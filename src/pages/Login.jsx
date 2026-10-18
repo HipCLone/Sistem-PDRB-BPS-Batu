@@ -13,6 +13,6 @@ export default function Login(){
       <label>Username<input required autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} maxLength={100}/></label>
       <label>Password<input required type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} maxLength={200}/></label>
       {error&&<p className="error-box" role="alert">{error}</p>}<button className="primary-btn full" disabled={busy}>{busy?'Memeriksa akun...':'Masuk'}</button>
-    </form><details className="demo"><summary>Akun pengujian lokal</summary><p>Khusus pengujian proyek di komputer lokal.</p><button type="button" className="secondary-btn" onClick={()=>{setUsername('admin');setPassword('admin123');}}>Isi akun admin</button><button type="button" className="secondary-btn" onClick={()=>{setUsername('bapenda');setPassword('123456');}}>Isi akun Bapenda</button></details></section>
+    </form></section>
   </main>;
 }

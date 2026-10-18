@@ -5,11 +5,12 @@ const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
-const { randomUUID } = require('crypto');
+const { randomUUID, createHash } = require('crypto');
 const { readSheets } = require('./import-workbook.js');
 const presentation=import('../src/lib/sheetPresentation.mjs');
 const periodsModule=import('../src/lib/periods.mjs');
 const labelsModule=import('../src/lib/datasetLabels.mjs');
+const drasticModule=import('../src/lib/drasticChanges.mjs');
 
 function createApp(options={}) {
 if(!options.storage&&!options.dataDir)throw new Error('Penyimpanan PostgreSQL wajib untuk runtime. JSON hanya tersedia pada pengujian terisolasi.');
@@ -161,6 +162,11 @@ function audit(user, action, details){
     recipients=db.users.filter(u=>u.role==='admin');
     title=action==='EDIT_CELL'?'Data instansi diperbarui':'Upload baru dari instansi';
     message=`${user.institution||user.name} ${action==='EDIT_CELL'?'mengisi atau mengedit data':'mengunggah data baru'} pada ${details.dataTitle||'data pelaporan instansi'}.`;
+    if(details.drasticChange){
+      title='Perubahan data drastis';
+      const change=details.drasticChange;
+      message=`${user.institution||user.name}: ${change.indicator}, ${change.currentPeriod}, ${change.currentValue} dibanding ${change.previous.value} pada ${change.previous.period}. Alasan: ${change.reason}`;
+    }
   }
   if(recipients.length){
     db.notifications||=[];
@@ -240,7 +246,7 @@ app.patch('/api/workbooks/:id/cell',auth,async(req,res)=>{
   const wb=findWorkbook(req.params.id); if(!wb) return res.status(404).json({message:'Dataset tidak ditemukan'});
   if(!canAccessWorkbook(req.user,wb)) return res.status(403).json({message:'Akses ditolak'});
   if(req.user.role!=='admin'&&req.user.institution==='Bapenda')return res.status(403).json({message:'Bapenda hanya dapat mengunggah Excel/CSV, bukan mengedit nilai manual'});
-  const {sheetIndex,rowIndex,colIndex,value}=req.body||{};
+  const {sheetIndex,rowIndex,colIndex,value,reason,comparisonToken}=req.body||{};
   if(!validIndex(sheetIndex)||!validIndex(rowIndex)||!validIndex(colIndex)||!validValue(value)) return res.status(400).json({message:'Lokasi atau nilai sel tidak valid'});
   const sheet=applyOverrides(wb).sheets[sheetIndex];
   if(!sheet || !sheet.rows[rowIndex]) return res.status(400).json({message:'Cell tidak ditemukan'});
@@ -251,11 +257,24 @@ app.patch('/api/workbooks/:id/cell',auth,async(req,res)=>{
   const merge=mergedCells(sheet).find(m=>rowIndex>=m.r&&rowIndex<=m.endRow&&colIndex>=m.c&&colIndex<=m.endCol);
   if(merge&&(rowIndex!==merge.r||colIndex!==merge.c))return res.status(400).json({message:'Edit nilai sel utama pada area gabungan'});
   const clean = value === '' ? null : value;
+  let drasticChange=null;
+  if(req.user.role!=='admin'){
+    const {assessDrasticChange}=await drasticModule;
+    const current=applyOverrides(wb);
+    const change=assessDrasticChange(current,{sheetIndex,rowIndex,colIndex,value:clean},allWorkbooks().filter(w=>w.institution===wb.institution).map(applyOverrides));
+    if(change){
+      const token=createHash('sha256').update(JSON.stringify({workbookId:wb.id,sheetIndex,rowIndex,colIndex,change})).digest('hex');
+      if(typeof reason!=='string'||!reason.trim()||reason.length>2000||comparisonToken!==token){
+        return res.status(422).json({code:'DRASTIC_CHANGE_REASON_REQUIRED',message:'Perubahan drastis memerlukan alasan. Periksa nilai pembanding sebelum menyimpan.',change:{...change,comparisonToken:token}});
+      }
+      drasticChange={...change,reason:reason.trim()};
+    }
+  }
   if(!db.overrides[wb.id]) db.overrides[wb.id]={};
   db.overrides[wb.id][`${sheetIndex}:${rowIndex}:${colIndex}`] = typeof clean === 'number' ? {v:clean,t:'number',calc:null,fmt:'General'} : {v:clean,t:'string',calc:null,fmt:'General'};
   db.editedRows||={};db.editedRows[wb.id]||={};db.editedRows[wb.id][sheetIndex]||=[];
   if(!db.editedRows[wb.id][sheetIndex].some(r=>r.rowIndex===rowIndex))db.editedRows[wb.id][sheetIndex].push({rowIndex,tableId:block.id});
-  audit(req.user,'EDIT_CELL',{workbookId:wb.id,workbook:wb.file,institution:wb.institution,sheet:sheet.name,sheetIndex,row:rowIndex+1,col:colIndex+1});
+  audit(req.user,'EDIT_CELL',{workbookId:wb.id,workbook:wb.file,institution:wb.institution,sheet:sheet.name,sheetIndex,row:rowIndex+1,col:colIndex+1,...(drasticChange?{drasticChange}:{})});
   res.json({ok:true});
 });
 

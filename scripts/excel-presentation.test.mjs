@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import {createRequire} from 'node:module';
 import {detectBlocks,mergedValue} from '../src/lib/sheetPresentation.mjs';
 import {displayCell,formatCell,hasContent} from '../src/lib/cells.mjs';
+import {withNamedColumns,filterBlockPeriod} from '../src/lib/periods.mjs';
 import {auditSheet} from './audit-excel.mjs';
 const require=createRequire(import.meta.url);
 const {normalizeSheet}=require('../backend/clean.js');
@@ -11,6 +12,19 @@ const value=v=>({v,t:typeof v==='number'?'number':'string',calc:null});
 const sheet=(rows,extra={})=>({name:'Pengujian',rows:rows.map(row=>row.map(v=>v==null?null:typeof v==='object'?v:value(v))),mergedRanges:[],...extra});
 const seed=JSON.parse(fs.readFileSync(new URL('../backend/data/workbooks.json',import.meta.url),'utf8'));
 const get=id=>seed.workbooks.flatMap(w=>w.sheets).find(s=>s.id===id);
+
+test('read view retains named empty periods and prepared columns without adding empty source axes',()=>{
+  const block={columns:[0,1,5],schemaColumns:[0,1,2,3,4,5],schemaLabels:['Indikator','2026 TW 2','2026 TW 3','Catatan admin','Nilai sumber (E)','Keterangan sumber (F)'],schemaPaths:[['Indikator'],['2026 TW 2'],['2026 TW 3'],['Catatan admin'],['Nilai sumber (E)'],['Keterangan sumber (F)']],rowIndexes:[2,3]};
+  const view=withNamedColumns(block);
+  assert.deepEqual(view.columns,[0,1,2,3,5]);assert.deepEqual(view.rowIndexes,[2,3]);
+  assert.equal(view.labels[2],'2026 TW 3');assert.deepEqual(view.headerPaths[2],['2026 TW 3']);
+  assert.deepEqual(filterBlockPeriod(view,'2026','3').columns,[0,2,3,5]);
+  assert.deepEqual(block.columns,[0,1,5]);
+  const agriculture=seed.workbooks.find(w=>w.id==='a-dinas-pertanian').sheets.find(s=>s.name==='Tanaman Pangan');
+  const source=detectBlocks(agriculture)[0],read=withNamedColumns(source);
+  assert.equal(source.columns.length,9);assert.equal(read.columns.length,11);assert.equal(source.schemaColumns.length,11);
+  assert(read.labels.includes('2026 TW 3'));assert(read.labels.includes('2026 TW 4'));
+});
 
 test('merged year and quarter headers remain contextual after normalization',()=>{
   const input=sheet([['Keterangan',2025,null,2026,null],[null,'I','II','I','II'],['Stok',null,null,42,null]],{mergedRanges:['A1:A2','B1:C1','D1:E1']});

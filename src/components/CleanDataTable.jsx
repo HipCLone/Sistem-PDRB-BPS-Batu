@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { cellClassName, displayCell, formatCell } from '../lib/format';
 import { hasContent, isUnavailableCell } from '../lib/cells.mjs';
 import { mergedCells, mergedValue } from '../lib/sheetPresentation.mjs';
@@ -41,6 +41,24 @@ export default function CleanDataTable({sheet,sheetIndex,block,rows,editing,onSa
   const {columns,labels}=block;
   const merges=mergedCells(sheet);
   const descriptorIndex=/^(no\.?|nomor|kode rekening)$/i.test(labels[0]||'')&&columns.length>1?1:0;
+  const viewport=useRef(null),table=useRef(null),regionId=useId(),hintId=useId();
+  const [position,setPosition]=useState({left:0,max:0,narrow:false});
+  const measure=()=>{
+    const element=viewport.current;if(!element)return;
+    const max=Math.max(0,element.scrollWidth-element.clientWidth),left=Math.min(max,Math.max(0,element.scrollLeft)),narrow=element.clientWidth<480;
+    setPosition(previous=>previous.left===left&&previous.max===max&&previous.narrow===narrow?previous:{left,max,narrow});
+  };
+  useEffect(()=>{
+    const observer=new ResizeObserver(measure);
+    observer.observe(viewport.current);observer.observe(table.current);measure();
+    return()=>observer.disconnect();
+  },[]);
+  useEffect(()=>{viewport.current.scrollTo({left:0,top:0,behavior:'auto'});measure();},[sheetIndex,block.id]);
+  useEffect(()=>{viewport.current.scrollTop=0;},[rows[0]?.index]);
+  const scrollTo=left=>{viewport.current.scrollTo({left,behavior:'auto'});measure();};
+  const shift=direction=>scrollTo(viewport.current.scrollLeft+direction*Math.max(80,viewport.current.clientWidth*.7));
+  const overflow=position.max>1,atEnd=position.max-position.left<=1;
+  const percentage=position.max?Math.round(position.left/position.max*100):0;
 
   return <>
     <TableSourceNotes block={block}/>
@@ -48,12 +66,20 @@ export default function CleanDataTable({sheet,sheetIndex,block,rows,editing,onSa
 
     <div className="data-table-summary">
       <span><b>{block.rowIndexes.length}</b> baris data</span>
-      <span><b>{columns.length}</b> {editing?'kolom tersedia':'kolom terisi'}</span>
-      <span>{editing?'Isi atau ubah nilai, lalu tekan Enter atau pindah sel untuk menyimpan.':'Baris dan kolom tanpa isi disembunyikan. "-" berarti nilai belum tersedia.'}</span>
+      <span><b>{columns.length}</b> {editing?'kolom tersedia':'kolom ditampilkan'}</span>
+      <span>{editing?'Isi atau ubah nilai, lalu tekan Enter atau pindah sel untuk menyimpan.':'Kolom berjudul tetap ditampilkan meskipun belum diisi. "-" berarti nilai belum tersedia.'}</span>
     </div>
 
-    <div className="excel-wrap clean-table-wrap" tabIndex={0} role="region" aria-label={`Tabel ${block.label}, geser untuk melihat semua kolom`}>
-      <table className="excel-table clean-table">
+    <div className="table-view-controls">
+      <label className="table-position"><span className="sr-only">Geser kolom tabel {block.label}</span><input type="range" min={0} max={Math.max(1,position.max)} step={1} value={position.left} disabled={!overflow} aria-controls={regionId} aria-valuetext={overflow?`${percentage}% dari lebar yang dapat digeser`:'Semua kolom yang ditampilkan muat di area tabel'} onChange={e=>scrollTo(Number(e.target.value))}/></label>
+      <p id={hintId} className="table-scroll-hint">{overflow?(atEnd?'Akhir tabel. Geser bar ke kiri untuk melihat kolom sebelumnya.':'Geser bar ke kanan atau kiri untuk melihat kolom lainnya.'):'Semua kolom yang ditampilkan muat di area tabel.'}</p>
+    </div>
+    <div ref={viewport} id={regionId} className={`excel-wrap clean-table-wrap${position.narrow?' table-narrow':''}`} tabIndex={0} role="region" aria-describedby={hintId} aria-label={`Tabel ${block.label}, geser untuk melihat semua kolom`} onScroll={measure} onKeyDown={e=>{
+      if(e.target!==e.currentTarget)return;
+      if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();shift(e.key==='ArrowLeft'?-1:1);}
+      if(e.key==='Home'||e.key==='End'){e.preventDefault();scrollTo(e.key==='Home'?0:position.max);}
+    }}>
+      <table ref={table} className="excel-table clean-table">
         <caption>{block.label}</caption>
         <thead><tr>{columns.map((ci,i)=><th key={ci} className={i===descriptorIndex?'descriptor-cell':undefined} scope="col" title={labels[i]}>{block.headerPaths[i].map((part,n)=><span className="table-header-part" key={n}>{part}</span>)}</th>)}{editing&&onDeleteRow&&<th scope="col">Tindakan baris</th>}</tr></thead>
         <tbody>

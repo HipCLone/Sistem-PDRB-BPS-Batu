@@ -99,6 +99,21 @@ test('PostgreSQL adapter preserves API permissions, concurrent edits, uploads, n
     const position=await storage.transaction(false,state=>state.db.overrides[created.data.workbook.id]['0:1:1'].v);assert.equal(position,0);
     await pool.db.query("UPDATE pdrb.cell_overrides SET data=$1 WHERE dataset_id=$2 AND sheet_index=0 AND row_index=1 AND col_index=1",[JSON.stringify({v:77,t:'number',calc:null,fmt:'General'}),created.data.workbook.id]);
     assert.equal(await storage.transaction(false,state=>state.db.overrides[created.data.workbook.id]['0:1:1'].v),77);
+    const monitored=await call('/workbooks',admin,{title:'PG perubahan drastis',institution:'BULOG',table:{label:'Stok periode',columns:['Indikator','2026 Triwulan I','2026 Triwulan II'],rowLabels:['Beras']}},'POST');
+    const monitoredUrl='/workbooks/'+monitored.data.workbook.id,edit={sheetIndex:0,rowIndex:1,colIndex:2,value:200};
+    await call(monitoredUrl+'/cell',admin,{...edit,colIndex:1,value:100},'PATCH');
+    const challenge=await call(monitoredUrl+'/cell',bulog,edit,'PATCH');assert.equal(challenge.status,422);
+    const explained={...edit,reason:'Panen meningkat',comparisonToken:challenge.data.change.comparisonToken};
+    const beforeExplanation=await storage.transaction(false,state=>structuredClone(state.db));
+    pool.rejectNextAuditInsert();assert.equal((await call(monitoredUrl+'/cell',bulog,explained,'PATCH')).status,503);
+    assert.deepEqual(await storage.transaction(false,state=>state.db),beforeExplanation);
+    assert.equal((await call(monitoredUrl+'/cell',bulog,explained,'PATCH')).status,200);
+    const restartedStorage=createPostgresStorage(pool);
+    await restartedStorage.transaction(false,state=>{
+      assert.equal(state.db.audit[0].details.drasticChange.reason,'Panen meningkat');
+      assert(state.db.notifications[0].message.includes('Panen meningkat'));
+      assert.equal(state.db.overrides[monitored.data.workbook.id]['0:1:2'].v,200);
+    });
     assert.equal(fs.existsSync(path.join(directory,'db.json')),false);
   }finally{await new Promise(r=>server.close(r));await pool.end();}
 });

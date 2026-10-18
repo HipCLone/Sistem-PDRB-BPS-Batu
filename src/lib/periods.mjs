@@ -33,3 +33,9 @@ export function filterBlockPeriod(block,year='all',quarter='all',fallbackYear=nu
     (!period.year&&!period.quarter)||((year==='all'||!period.year||year===period.year)&&(quarter==='all'||!period.quarter||quarter===period.quarter)));
   return {...block,columns:selected.map(x=>x.column),labels:selected.map(x=>block.labels[x.i]),headerPaths:selected.map(x=>block.headerPaths[x.i])};
 }
+
+export function withNamedColumns(block){
+  const selected=block.schemaColumns.map((column,i)=>({column,i,label:block.schemaLabels[i]})).filter(({column,label})=>
+    block.columns.includes(column)||(String(label||'').trim()&&!/^(?:keterangan|nilai) sumber \([A-Z]+\)$/i.test(label)));
+  return {...block,columns:selected.map(x=>x.column),labels:selected.map(x=>block.schemaLabels[x.i]),headerPaths:selected.map(x=>block.schemaPaths[x.i])};
+}

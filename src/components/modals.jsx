@@ -4,9 +4,24 @@ import { parseValue } from '../lib/format';
 function Dialog({title,description,onClose,busy,children,initialFocus}){
   const ref=useRef(null),id=useId();
   useEffect(()=>{const previous=document.activeElement;ref.current.showModal();if(initialFocus)ref.current.querySelector(initialFocus)?.focus();return()=>{previous?.focus();};},[]);
-  return <dialog ref={ref} className="dialog" aria-labelledby={id} onCancel={e=>{e.preventDefault();if(!busy)onClose();}} onClick={e=>{if(e.target===e.currentTarget&&!busy)onClose();}}><div className="modal"><div className="modal-heading"><h2 id={id}>{title}</h2><button className="text-btn" type="button" disabled={busy} onClick={onClose}>Tutup</button></div><p>{description}</p>{children}</div></dialog>;
+  return <dialog ref={ref} className="dialog" aria-labelledby={id} onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();if(!busy)onClose();}}} onCancel={e=>{e.preventDefault();if(!busy)onClose();}} onClick={e=>{if(e.target===e.currentTarget&&!busy)onClose();}}><div className="modal"><div className="modal-heading"><h2 id={id}>{title}</h2><button className="text-btn" type="button" disabled={busy} onClick={onClose}>Tutup</button></div><p>{description}</p>{children}</div></dialog>;
 }
 function useSubmit(action){const [busy,setBusy]=useState(false),[error,setError]=useState('');return {busy,error,run:async(...args)=>{if(busy)return;setBusy(true);setError('');try{await action(...args);}catch(e){setError(e.message);}finally{setBusy(false);}}};}
+
+export function DrasticChangeModal({change,onClose,onSubmit}){
+  const [reason,setReason]=useState(''),{busy,error,run}=useSubmit(onSubmit);
+  const number=value=>new Intl.NumberFormat('id-ID',{maximumFractionDigits:6}).format(value);
+  return <Dialog title="Jelaskan perubahan drastis" description="Nilai belum disimpan. Kenaikan minimal dua kali lipat atau penurunan minimal 50% dari periode sebelumnya memerlukan alasan untuk admin." busy={busy} onClose={onClose} initialFocus="textarea">
+    <p><strong>{change.table}</strong><br/>{change.indicator}</p>
+    <dl className="change-comparison"><div><dt>Periode sebelumnya: {change.previous.period}</dt><dd>{number(change.previous.value)}</dd></div><div><dt>Nilai yang akan disimpan: {change.currentPeriod}</dt><dd>{number(change.currentValue)}</dd></div><div><dt>{change.direction==='increase'?'Kenaikan':'Penurunan'}</dt><dd>{number(Math.abs(change.percentage))}%</dd></div></dl>
+    <form onSubmit={e=>{e.preventDefault();run(reason.trim());}}>
+      <label>Alasan {change.direction==='increase'?'kenaikan':'penurunan'}<textarea required maxLength={2000} rows={4} disabled={busy} value={reason} onChange={e=>setReason(e.target.value)}/></label>
+      <p className="field-help">Alasan tersimpan dalam log histori dan notifikasi admin. Maksimal 2.000 karakter.</p>
+      {error&&<p className="error-box" role="alert">{error}</p>}
+      <div className="form-actions"><button type="button" className="secondary-btn" disabled={busy} onClick={onClose}>Batal</button><button className="primary-btn" disabled={busy||!reason.trim()}>{busy?'Menyimpan...':'Simpan nilai dan alasan'}</button></div>
+    </form>
+  </Dialog>;
+}
 
 export function RowModal({sheet,block,onClose,onSubmit}){
   const [values,setValues]=useState(()=>Array(sheet.maxCol).fill('')),{busy,error,run}=useSubmit(onSubmit);
