@@ -20,6 +20,7 @@ export default function App(){
         <Route path="beranda" element={<Dashboard/>}/>
         <Route path="data" element={<DataList/>}/>
         <Route path="data/:id" element={<DatasetPage/>}/>
+        <Route path="status-pengumpulan" element={<Navigate to={`/data${location.search}`} replace/>}/>
         <Route path="notifications" element={<Notifications/>}/>
         <Route path="profile" element={<Profile/>}/>
         <Route path="*" element={<NotFound/>}/>

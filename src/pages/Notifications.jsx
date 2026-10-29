@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { useAsyncData } from '../lib/useAsyncData';
 import { useNotifications } from '../components/NotificationCenter';
 import { Empty, Loading, PageIntro, RouteFeedback } from '../components/ui';
-const actions={EDIT_CELL:'Perubahan nilai sel',ADD_ROW:'Penambahan baris',ADD_COLUMN:'Penambahan kolom',UPLOAD_FILE:'Upload berkas',CREATE_DATASET:'Pembuatan data',UPDATE_DATASET:'Perubahan informasi data',DELETE_DATASET:'Penghapusan data',ADD_TABLE:'Penambahan tabel',RENAME_TABLE:'Perubahan nama tabel',DELETE_TABLE:'Penghapusan tabel',DELETE_ROW:'Penghapusan baris',DELETE_COLUMN:'Penghapusan kolom',RENAME_COLUMN:'Perubahan nama kolom'};
+const actions={EDIT_CELL:'Perubahan nilai sel',ADD_ROW:'Penambahan baris',ADD_COLUMN:'Penambahan kolom',UPLOAD_FILE:'Upload berkas',CREATE_DATASET:'Pembuatan data',UPDATE_DATASET:'Perubahan informasi data',DELETE_DATASET:'Penghapusan data',ADD_TABLE:'Penambahan tabel',RENAME_TABLE:'Perubahan nama tabel',DELETE_TABLE:'Penghapusan tabel',DELETE_ROW:'Penghapusan baris',DELETE_COLUMN:'Penghapusan kolom',RENAME_COLUMN:'Perubahan nama kolom',RENAME_ROW:'Perubahan nama baris',SUBMIT_REPORT:'Pengumpulan laporan',RESTORE_ORIGINAL_DATA:'Pemulihan data asli'};
 const formatTime=value=>new Date(value).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'});
 function ChangeHistory({change}){
   if(!change)return null;
@@ -37,7 +37,7 @@ export default function Notifications(){
     </section>
     <section className="panel notification-history" aria-labelledby="history-title">
       <div className="notification-section-heading"><div><h2 id="history-title">Log histori</h2><p>Siapa yang mengubah data, jenis tindakan, dan waktu perubahan. Menandai notifikasi dibaca tidak menghapus histori.</p></div></div>
-      {loading?<Loading text="Memuat log histori..."/>:items.length?<ul className="notice-list">{items.slice((historyPage-1)*20,historyPage*20).map((item,i)=><li key={item.id||`${item.at}-${i}`}><h3>{actions[item.action]||item.action}</h3><p>{[item.userName||item.user,item.details?.dataTitle||'Data pelaporan instansi',item.details?.sheet].filter(Boolean).join(' · ')}</p><ChangeHistory change={item.details?.drasticChange}/><time dateTime={item.at}>{formatTime(item.at)} WIB</time></li>)}</ul>:<Empty title="Belum ada histori" text="Riwayat akan muncul setelah data ditambahkan, diubah, diunggah, atau dihapus."/>}
+      {loading?<Loading text="Memuat log histori..."/>:items.length?<ul className="notice-list">{items.slice((historyPage-1)*20,historyPage*20).map((item,i)=><li key={item.id||`${item.at}-${i}`}><h3>{actions[item.action]||item.action}</h3><p>{[item.userName||item.user,item.details?.dataTitle||'Data pelaporan instansi',item.details?.sheet,item.details?.year&&item.details?.quarter?`${item.details.year}, Triwulan ${item.details.quarter}`:null].filter(Boolean).join(' · ')}</p><ChangeHistory change={item.details?.drasticChange}/><time dateTime={item.at}>{formatTime(item.at)} WIB</time></li>)}</ul>:<Empty title="Belum ada histori" text="Riwayat akan muncul setelah data ditambahkan, diubah, diunggah, atau dihapus."/>}
       <Pages page={historyPage} total={historyTotal} label="Halaman log histori" onChange={p=>change('riwayat',p)}/>
     </section>
   </>;

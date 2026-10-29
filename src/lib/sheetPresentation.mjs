@@ -192,12 +192,16 @@ export function detectBlocks(sheet){
     const state=sheet?.tableState?.[block.id]||{};
     if(state.deleted)return [];
     const trackedRows=(sheet.editedRows||[]).filter(r=>r.tableId===block.id).map(r=>r.rowIndex);
-    const rowIndexes=[...new Set([...block.rowIndexes,...trackedRows.filter(r=>sheet.rows[r]?.some(hasContent))])].filter(r=>!state.deletedRows?.includes(r)).sort((a,b)=>a-b);
-    const editableRowIndexes=[...new Set([...rowIndexes,...block.placeholderRows,...(sheet.editedRows||[]).filter(r=>r.tableId===block.id).map(r=>r.rowIndex),...(sheet.tableRows||[]).filter(r=>r.tableId===block.id).map(r=>r.rowIndex)])].filter(r=>!state.deletedRows?.includes(r)&&!block.sectionRows.includes(r)).sort((a,b)=>a-b);
+    const additions=(sheet.tableRows||[]).filter(r=>r.tableId===block.id);
+    const orderRows=rows=>{const set=new Set(rows),added=new Set(additions.map(r=>r.rowIndex));const ordered=[...new Set([...rows,...block.rowIndexes,...block.placeholderRows,...trackedRows])].filter(r=>!added.has(r)).sort((a,b)=>a-b);for(const item of additions){const target=ordered.indexOf(item.beforeRowIndex);if(target<0)ordered.push(item.rowIndex);else ordered.splice(target,0,item.rowIndex);}return ordered.filter(r=>set.has(r));};
+    const allRows=[...block.rowIndexes,...trackedRows.filter(r=>sheet.rows[r]?.some(hasContent))];
+    const rowIndexes=orderRows(allRows).filter(r=>!state.deletedRows?.includes(r));
+    const displayEditRowIndexes=orderRows([...allRows,...block.placeholderRows,...trackedRows,...additions.map(r=>r.rowIndex)]).filter(r=>!state.deletedRows?.includes(r));
+    const editableRowIndexes=displayEditRowIndexes.filter(r=>!block.sectionRows.includes(r));
     const schemaColumns=block.schemaColumns.filter(c=>!state.deletedColumns?.includes(c));
     const columns=block.columns.filter(c=>schemaColumns.includes(c));
     const paths=new Map(block.schemaColumns.map((c,i)=>[c,state.columnLabels?.[c]?[state.columnLabels[c]]:(block.headerPaths[block.columns.indexOf(c)]||block.schemaPaths[i])]));
-    return [{...block,label:state.label||(sheet.manualHeaders?sheet.name:block.label),rowIndexes,editableRowIndexes,columns,schemaColumns,
+    return [{...block,label:state.label||(sheet.manualHeaders?sheet.name:block.label),rowIndexes,editableRowIndexes,displayEditRowIndexes,columns,schemaColumns,
       labels:columns.map(c=>paths.get(c).join(' · ')),headerPaths:columns.map(c=>paths.get(c)),
       schemaLabels:schemaColumns.map(c=>paths.get(c).join(' · ')),schemaPaths:schemaColumns.map(c=>paths.get(c)),
       sectionRows:block.sectionRows.filter(r=>rowIndexes.includes(r)),placeholderRows:block.placeholderRows.filter(r=>!state.deletedRows?.includes(r)),isTemplate:!rowIndexes.length||block.isTemplate}];

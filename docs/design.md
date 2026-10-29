@@ -11,12 +11,12 @@ Pembacaan desain: portal kerja data untuk admin dan petugas instansi Kota Batu. 
 - Beranda membantu memilih instansi atau membuka tabel milik akun, bukan menampilkan daftar nama file teknis. Panduan membaca tabel berada di samping pilihan data pada desktop dan di bawahnya pada mobile.
 - Ruang antartabel lebih besar daripada jarak antarkontrol. Ukuran kontrol minimum 44 px memudahkan penggunaan layar sentuh.
 - Radius kecil membedakan bidang input dan panel. Bayangan hanya untuk dialog dan popup notifikasi yang menumpang di atas isi halaman.
-- Ikon dipakai pada identitas portal dan umpan balik kesalahan; label teks tetap tersedia. Atas permintaan pengguna, simbol tiga batang statistik bernuansa biru, hijau, dan jingga dipasang pada tab browser, login, dan wordmark. Ini ikon khusus aplikasi, bukan logo resmi BPS. Bentuk batang adalah simbol statistik, bukan representasi angka atau tren PDRB.
+- Ikon dipakai pada identitas portal dan umpan balik kesalahan; label teks tetap tersedia. Atas permintaan pengguna, logo BPS dari aset proyek presensi dipakai pada tab browser, login, dan wordmark.
 - Catatan sumber dapat dibuka saat diperlukan. Sel tanpa nilai memakai tanda minus dengan penjelasan yang dapat dibaca pembaca layar.
 - Pada layar sempit, filter bertumpuk dan daftar file berubah menjadi baris informasi. Tabel lebar bergulir di dalam wadahnya sendiri.
 - Transisi hanya memberi umpan balik hover/fokus dan menghormati preferensi reduced motion.
 
-Klarifikasi hak akses terbaru: admin membuat, membaca, mengedit, dan menghapus dataset/tabel/baris/kolom seluruh instansi. Instansi selain Bapenda mengisi dan mengedit sel tabel miliknya, termasuk kolom kosong buatan admin, tanpa mengubah struktur. Bapenda membaca dan hanya mengunggah Excel/CSV, tanpa edit manual. Template upload boleh berbeda dan setiap upload menjadi dataset baru.
+Klarifikasi hak akses terbaru: admin membuat, membaca, mengedit, dan menghapus dataset/tabel/baris/kolom seluruh instansi. Semua instansi, termasuk Bapenda, dapat mengisi dan mengedit sel tabel miliknya tanpa mengubah struktur. Bapenda juga dapat mengunggah Excel/CSV. Template upload boleh berbeda dan setiap upload menjadi dataset baru.
 
 CRUD tetap berada pada halaman data, tidak menambah menu navigasi. Form pembuatan tabel meminta nama kolom dan indikator asli dari admin, bukan baris contoh buatan. Mode edit membuka kolom kosong agar instansi bisa mengisinya; mode baca tetap menampilkan kolom berjudul meskipun belum terisi, tetapi menyembunyikan baris kosong dan kolom tanpa judul asli yang tidak terisi. Dialog penghapusan memberi konfirmasi dengan fokus awal pada Batal. Penghapusan memakai penanda di database dan mempertahankan koordinat Excel agar profil, merge, dan perubahan sel tidak berpindah.
 
@@ -28,7 +28,7 @@ Alur masuk: URL `/` selalu menuju `/login`, termasuk ketika sesi tersimpan. Sete
 
 Keselarasan: header, isi, dan footer memakai inset bersama 32 px desktop, 24 px tablet, dan 16 px mobile. Kolom daftar memakai proporsi tetap agar nama instansi, judul, periode, dan tindakan mudah dipindai. Navigasi mobile tiga tujuan memakai grid dua kolom, dengan Akun pada baris penuh dan target sentuh minimum 44 px. Notifikasi dipindahkan dari menu Aktivitas ke lonceng pada header.
 
-Ikon identitas memakai satu aset SVG lokal agar tajam pada favicon dan ukuran 40 px, tanpa font ikon atau permintaan jaringan luar. Warna hijau dan jingga dibatasi pada ikon, tidak menjadi aksen tambahan pada tabel. Ikon di samping nama bersifat dekoratif untuk pembaca layar agar nama portal tidak dibaca dua kali.
+Identitas memakai logo BPS PNG lokal pada favicon dan ukuran 40 px, tanpa permintaan jaringan luar. Warna hijau dan jingga dibatasi pada logo, tidak menjadi aksen tambahan pada tabel. Logo di samping nama bersifat dekoratif untuk pembaca layar agar nama portal tidak dibaca dua kali.
 
 ## Notifikasi dan identitas instansi
 
@@ -44,15 +44,29 @@ Migrasi PostgreSQL mempertahankan kontrak API dan grid Excel sehingga tampilan, 
 
 ## Tabel lebar dan panjang
 
-Revisi pengguna: setiap tabel cukup memiliki satu bar geser horizontal di atas header tabel, tanpa pilihan kerapatan, tinggi tabel, atau tombol geser tambahan. Bar tetap terlihat dan nonaktif ketika seluruh kolom sudah muat. Posisi bar mengikuti gulir langsung pada tabel, keyboard, serta perubahan lebar layar. Area sentuh minimal 44 px; label bar tersedia untuk pembaca layar. Header, ukuran teks, tinggi area gulir, dan pagination tetap seperti semula. Panah keyboard serta Home/End bekerja ketika wadah tabel mendapat fokus, tanpa mengambil alih tombol pada input sel. Warna biru dan font sistem mengikuti portal dokumen kerja (ENERGY 1 / RHYTHM 2 / MOTION 1); tidak ada animasi gulir.
+Revisi 20 Oktober 2026: bar geser biru di atas tabel dihapus. Tabel tetap memakai scrollbar horizontal native di bawah wadah, tanpa pilihan kerapatan, tinggi tabel, atau tombol geser tambahan. Header, ukuran teks, tinggi area gulir, dan pagination tetap seperti semula. Panah keyboard serta Home/End bekerja ketika wadah tabel mendapat fokus, tanpa mengambil alih tombol pada input sel. Warna biru dan font sistem mengikuti portal dokumen kerja (ENERGY 1 / RHYTHM 2 / MOTION 1); tidak ada animasi gulir.
 
 Jika area tabel lebih sempit dari 480 px, indikator ikut bergeser secara horizontal supaya kolom lengket tidak menutupi angka di sebelah kanan. Header tetap lengket secara vertikal pada area gulir. Pengukuran mengikuti lebar wadah tabel, bukan hanya ukuran layar.
 
-Koreksi mode baca: semua kolom berjudul yang belum diisi tetap ditampilkan, termasuk periode pelaporan mendatang dan kolom buatan admin. Kolom tanpa judul asli yang seluruh nilainya kosong tetap disembunyikan. Filter tahun/triwulan dan penghapusan kolom tetap dihormati. Bar geser mengukur kolom yang sedang ditampilkan; status muat tidak menyatakan bahwa periode di luar filter sudah terlihat. Baris kosong tidak ikut ditambahkan. Sel kosong memakai tanda minus, bukan angka nol.
+Koreksi mode baca: semua kolom berjudul yang belum diisi tetap ditampilkan, termasuk periode pelaporan mendatang dan kolom buatan admin. Kolom tanpa judul asli yang seluruh nilainya kosong tetap disembunyikan. Filter tahun/triwulan dan penghapusan kolom tetap dihormati. Status muat tidak menyatakan bahwa periode di luar filter sudah terlihat. Baris kosong tidak ikut ditambahkan. Sel kosong memakai tanda minus, bukan angka nol.
+
+## Pengumpulan dan pengelolaan tabel
+
+Urutan kontrol periode adalah Tahun, lalu Triwulan. Satu tombol Edit data pada judul dataset mengaktifkan semua tabel bagian yang sedang dibuka; tidak ada tombol edit per tabel. Form tambah baris memakai susunan vertikal untuk identitas komoditas/indikator dan satuan opsional. Kolom periode tidak diminta pada pembuatan baris, agar petugas dapat mengisinya di tabel. Kelola tabel menyediakan pemilihan, perubahan nama, dan penghapusan baris bagi admin.
+
+Setiap tabel memiliki Download CSV. Ekspor mengikuti kolom dan baris hasil filter, mencakup seluruh halaman pagination, memakai hasil rumus tersimpan, dan melindungi teks awalan formula saat dibuka di spreadsheet. Tindakan unduh tidak memerlukan mode edit.
+
+Revisi lanjutan: halaman status terpisah dihapus, dan alamat lamanya diarahkan ke Data PDRB. Satu kolom status mengikuti tahun dan triwulan berjalan berdasarkan waktu Jakarta, tanpa berubah saat filter periode data digunakan. Tabel bergulir horizontal dalam wadahnya pada tablet; pada mobile status ditumpuk dengan label triwulan. Status dihitung untuk setiap dataset, sehingga dua dataset dari instansi yang sama dapat berbeda. Instansi tanpa data memiliki baris sendiri.
+
+Status berasal dari nilai aktif yang tersimpan pada tiap periode, bukan tombol penyerahan. Minimal satu nilai valid menghasilkan “Sudah terisi”; nilai kosong, rumus error, atau rumus yang bergantung pada sel kosong tidak dihitung. Angka nol adalah nilai. Kolom nama, kode, satuan, dan keterangan tidak dianggap isian periode. Tahun dan triwulan dibaca dari judul kolom, nama sheet/bulan, atau metadata periode upload; sumber dengan periode atau referensi rumus yang tidak dapat dipastikan ditandai “Perlu diperiksa”. Status tidak menyatakan seluruh tabel telah lengkap. Edit, pengosongan sel, dan penghapusan tabel/kolom/baris otomatis tercermin saat daftar dimuat kembali.
+
+Data lama diperiksa dari isinya, tanpa membuat histori palsu. Catatan penyerahan sebelumnya tetap tersimpan sebagai histori, namun tidak menentukan status isian. Status dihitung melalui API dari data PostgreSQL aktif; tidak ada migrasi atau perubahan massal database. Selama halaman Data PDRB terlihat, status diperbarui setiap 30 detik dan saat tab kembali terlihat. Upload tetap meminta tahun dan triwulan untuk membantu mengenali periode file.
 
 ## Alasan perubahan drastis
 
-Instansi yang mengisi atau mengedit sel wajib memberi alasan jika nilai minimal dua kali nilai periode sebelumnya, atau turun minimal 50%. Batas bersifat inklusif. Admin tetap dapat mengedit langsung; Bapenda tetap hanya mengunggah berkas, tanpa edit manual. Validasi ini berlaku pada penyimpanan sel, bukan pemeriksaan massal berkas upload.
+Instansi yang mengisi atau mengedit sel wajib memberi alasan jika nilai minimal dua kali nilai periode sebelumnya, atau turun minimal 50%. Batas bersifat inklusif. Admin tetap dapat mengedit langsung; validasi berlaku juga untuk edit manual Bapenda. Validasi ini berlaku pada penyimpanan sel, bukan pemeriksaan massal berkas upload.
+
+Latar halaman login dan area kerja memakai foto gedung yang disediakan pengguna dengan lapisan terang bernuansa biru BPS agar teks terbaca. Bidang tabel dan form tetap putih sehingga nilai tetap jelas. Tidak ada foto atau aset hasil generasi baru.
 
 Dialog menampilkan indikator, kedua periode, kedua nilai, persentase perubahan, dan alasan wajib maksimal 2.000 karakter. Tombol Simpan nilai dan alasan menyimpan keduanya; Batal, Tutup, atau Escape tidak menyimpan nilai. Dialog memakai komponen native yang sudah ada untuk fokus keyboard dan pembatasan interaksi, tanpa ikon atau warna baru. Susunan perbandingan vertikal menjaga keterbacaan pada layar sempit. Tipografi, warna biru tindakan utama, dan spasi mengikuti dokumen kerja portal (ENERGY 1 / RHYTHM 2 / MOTION 1).
 

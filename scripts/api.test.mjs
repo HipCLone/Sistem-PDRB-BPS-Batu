@@ -8,7 +8,79 @@ import {detectBlocks} from '../src/lib/sheetPresentation.mjs';
 import {parsePeriod,matchesPeriod,filterBlockPeriod} from '../src/lib/periods.mjs';
 import {datasetTitle,sheetLabel} from '../src/lib/datasetLabels.mjs';
 import {assessDrasticChange} from '../src/lib/drasticChanges.mjs';
+import {tableCsv} from '../src/lib/tableCsv.mjs';
+import {tableExcelWorkbook} from '../src/lib/tableExcel.mjs';
 const require=createRequire(import.meta.url),{createApp}=require('../backend/server.js');
+
+test('CSV exports all filtered rows, cached formulas, zeros, quotes and protects spreadsheet formulas',()=>{
+  const sheet={rows:[['Indikator','Nilai'],['=HYPERLINK("x")',0],['Beras',{t:'formula',v:'=G2',calc:5}],['Kosong',null]],mergedRanges:[]};
+  const block={labels:['Indikator','Nilai'],columns:[0,1],rowIndexes:[1,2,3]};
+  const csv=tableCsv(sheet,block);
+  assert(csv.startsWith('\uFEFF'));assert(csv.includes("'="));assert(csv.includes('"0"'));assert(csv.includes('"5"'));assert(!csv.includes('=G2'));assert.equal(csv.split('\r\n').length,4);
+});
+
+test('Excel exports readable widths, ordered rows, numeric cells and literal formula-like text',()=>{
+  const xlsx=require('xlsx');
+  const sheet={rows:[['Indikator','Nilai'],['=HYPERLINK("x")',0],['Komoditas dengan nama panjang',{t:'formula',v:'=G2',calc:5}],['Kosong',{t:'error',v:'#REF!'}]],mergedRanges:[]};
+  const block={labels:['Indikator','Nilai'],columns:[0,1],rowIndexes:[2,1,3]};
+  const buffer=xlsx.write(tableExcelWorkbook(xlsx,sheet,block),{type:'buffer',bookType:'xlsx'});
+  const result=xlsx.read(buffer,{type:'buffer',cellStyles:true}).Sheets.Data;
+  assert.deepEqual(xlsx.utils.sheet_to_json(result,{header:1}),[['Indikator','Nilai'],['Komoditas dengan nama panjang',5],['=HYPERLINK("x")',0],['Kosong','-']]);
+  assert.equal(result.A3.t,'s');assert.equal(result.A3.f,undefined);assert.equal(result.B2.t,'n');assert.equal(result.B3.v,0);
+  assert(result['!cols'][0].wch>=29);assert(result['!cols'][1].wch>=12);assert.equal(result['!autofilter'].ref,'A1:B4');
+});
+
+test('submission status enforces institutions, periods, append uploads, row management and persists on restart',async()=>{
+  const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'pdrb-submission-test-'));
+  const server=createApp({dataDir}).listen(0,'127.0.0.1');await new Promise(r=>server.on('listening',r));
+  const base=`http://127.0.0.1:${server.address().port}/api`;
+  const call=async(url,token,body,method='GET')=>{const response=await fetch(base+url,{method,headers:{Authorization:'Bearer '+(token||''),...(body&&!(body instanceof FormData)?{'Content-Type':'application/json'}:{})},body:body instanceof FormData?body:body?JSON.stringify(body):undefined});return {status:response.status,data:await response.json()};};
+  try{
+    const login=async username=>(await call('/auth/login','',{username,password:username==='admin'?'admin123':'123456'},'POST')).data.token;
+    const admin=await login('admin'),bulog=await login('bulog'),bapenda=await login('bapenda');
+    const status=await call('/reporting-status?year=2026',bulog);assert.equal(status.data.rows.length,1);assert(status.data.workbooks.every(w=>w.institution==='BULOG'));
+    assert.equal((await call('/reporting-status?year=bad',admin)).status,400);
+    assert.equal((await call('/reporting-status?year=2026')).status,401);
+    const created=await call('/workbooks',admin,{title:'Status test',institution:'BULOG',table:{label:'Stok',columns:['Komoditas','Satuan','2026 TW 1'],rowLabels:['Beras','Jagung']}},'POST');
+    const url='/workbooks/'+created.data.workbook.id;
+    assert.equal((await call(url+'/submit',bapenda,{year:'2026',quarter:'1'},'POST')).status,403);
+    assert.equal((await call(url+'/submit',bulog,{year:'2026',quarter:'9'},'POST')).status,400);
+    assert.equal((await call(url+'/submit',bulog,{year:'2026',quarter:'1'},'POST')).status,200);
+    const datasetStatus=async()=>(await call('/reporting-status?year=2026',bulog)).data.workbooks.find(w=>w.id===created.data.workbook.id).quarters;
+    assert.equal((await datasetStatus())[0].submitted,false);
+    assert.equal((await call(url+'/cell',bulog,{sheetIndex:0,rowIndex:1,colIndex:2,value:0},'PATCH')).status,200);
+    assert.equal((await datasetStatus())[0].submitted,true);
+    assert.equal((await call(url+'/cell',bulog,{sheetIndex:0,rowIndex:1,colIndex:2,value:null},'PATCH')).status,200);
+    assert.equal((await datasetStatus())[0].submitted,false);
+    assert.equal((await call(url+'/cell',bulog,{sheetIndex:0,rowIndex:1,colIndex:2,value:0},'PATCH')).status,200);
+    const change={sheetIndex:0,tableId:'blok-1',kind:'renameRow',rowIndex:1,label:'Padi'};
+    assert.equal((await call(url+'/table',bulog,change,'PATCH')).status,403);
+    assert.equal((await call(url+'/table',admin,change,'PATCH')).status,200);
+    assert.equal((await call(url,bulog)).data.workbook.sheets[0].rows[1][0].v,'Padi');
+    const form=period=>{const f=new FormData();f.append('file',new Blob(['Jenis,Nilai\nPajak,0\n']),'status.csv');if(period){f.append('year','2026');f.append('quarter',period);}return f;};
+    assert.equal((await call('/upload',bapenda,form(),'POST')).status,400);
+    const first=await call('/upload',bapenda,form('2'),'POST'),second=await call('/upload',bapenda,form('2'),'POST');
+    assert.equal(first.status,200);assert.equal(second.status,200);assert.notEqual(first.data.workbook.id,second.data.workbook.id);assert.deepEqual(first.data.workbook.periods,[{year:'2026',quarter:'2'}]);
+    const excel=XLSX.utils.book_new();XLSX.utils.book_append_sheet(excel,XLSX.utils.aoa_to_sheet([['Indikator','Nilai'],['Pajak',10]]),'Pelaporan');
+    const excelForm=new FormData();excelForm.append('year','2025');excelForm.append('quarter','4');excelForm.append('file',new Blob([XLSX.write(excel,{type:'buffer',bookType:'xlsx'})]),'data.xlsx');
+    const uploadedExcel=await call('/upload',bapenda,excelForm,'POST');assert.equal(uploadedExcel.status,200);assert.deepEqual(uploadedExcel.data.workbook.periods,[{year:'2025',quarter:'4'}]);
+    assert.equal((await call('/reporting-status?year=2025',bapenda)).data.rows[0].quarters[3].submitted,true);
+    assert.equal((await call('/workbooks/'+first.data.workbook.id+'/submit',bapenda,{year:'2026',quarter:'3'},'POST')).status,200);
+    assert.equal((await call('/reporting-status?year=2026',bapenda)).data.workbooks.find(w=>w.id===first.data.workbook.id).quarters[2].submitted,false);
+    const bpsCreated=await call('/workbooks',admin,{title:'Perubahan Bapenda',institution:'Bapenda',table:{label:'Pendapatan',columns:['Indikator','2025 TW 4','2026 TW 1'],rowLabels:['Pajak']}},'POST');
+    const bpsUrl='/workbooks/'+bpsCreated.data.workbook.id;
+    assert.equal((await call(bpsUrl+'/cell',admin,{sheetIndex:0,rowIndex:1,colIndex:1,value:100},'PATCH')).status,200);
+    const drastic=await call(bpsUrl+'/cell',bapenda,{sheetIndex:0,rowIndex:1,colIndex:2,value:200},'PATCH');assert.equal(drastic.status,422);
+    assert.equal((await call(bpsUrl+'/cell',bapenda,{sheetIndex:0,rowIndex:1,colIndex:2,value:200,reason:'Pelaporan meningkat',comparisonToken:drastic.data.change.comparisonToken},'PATCH')).status,200);
+    assert.equal((await call(bpsUrl+'/cell',bulog,{sheetIndex:0,rowIndex:1,colIndex:2,value:1},'PATCH')).status,403);
+    assert.equal((await call('/workbooks/'+second.data.workbook.id,admin,null,'DELETE')).status,200);
+    const afterDelete=(await call('/reporting-status?year=2026',bapenda)).data;
+    assert.equal(afterDelete.workbooks.find(w=>w.id===first.data.workbook.id).quarters[1].submitted,true);assert(!afterDelete.workbooks.some(w=>w.id===second.data.workbook.id));
+    const saved=JSON.parse(fs.readFileSync(path.join(dataDir,'db.json'),'utf8'));assert(saved.submissions.BULOG['2026:1']);assert(saved.audit.some(e=>e.action==='SUBMIT_REPORT'));
+    const restarted=createApp({dataDir}).listen(0,'127.0.0.1');await new Promise(r=>restarted.on('listening',r));
+    try{const response=await fetch(`http://127.0.0.1:${restarted.address().port}/api/reporting-status?year=2026`,{headers:{Authorization:'Bearer '+bulog}});assert.equal((await response.json()).workbooks.find(w=>w.id===created.data.workbook.id).quarters[0].submitted,true);}finally{await new Promise(r=>restarted.close(r));}
+  }finally{await new Promise(r=>server.close(r));}
+});
 const XLSX=require('xlsx'),{readSheets}=require('../backend/import-workbook.js');
 
 test('drastic changes use exact preceding periods and matching measures, not neighbouring columns',()=>{
@@ -131,7 +203,7 @@ test('isolated API enforces roles, validates writes, targets tables and persists
     assert.equal((await call(url+'/cell',admin.token,{sheetIndex:0,rowIndex:added.data.rowIndex,colIndex:sheet.maxCol,value:'Tersimpan'},'PATCH')).status,200);
     updated=(await call(url,admin.token)).data.workbook.sheets[0];after=detectBlocks(updated);
     assert(after[0].labels.includes('Catatan verifikasi'));assert(!after[1].schemaLabels.includes('Catatan verifikasi'));
-    const form=()=>{const f=new FormData();f.append('file',new Blob(['Indikator,Nilai 2026\nPendapatan,125\n'],{type:'text/csv'}),'uji.csv');return f;};
+    const form=()=>{const f=new FormData();f.append('year','2026');f.append('quarter','1');f.append('file',new Blob(['Indikator,Nilai 2026\nPendapatan,125\n'],{type:'text/csv'}),'uji.csv');return f;};
     assert.equal((await call('/upload',bulog.token,form())).status,403);
     const forged=form();forged.append('institution','BULOG');assert.equal((await call('/upload',bapenda.token,forged)).status,403);
     const oversized=form();oversized.append('title','a'.repeat(161));assert.equal((await call('/upload',bapenda.token,oversized)).status,400);
@@ -141,6 +213,28 @@ test('isolated API enforces roles, validates writes, targets tables and persists
     const restarted=createApp({dataDir,secret:'isolated-test-secret'}).listen(0,'127.0.0.1');await new Promise(resolve=>restarted.on('listening',resolve));
     try{const persisted=await fetch(`http://127.0.0.1:${restarted.address().port}/api${url}`,{headers:{Authorization:`Bearer ${admin.token}`}}).then(r=>r.json());assert.equal(persisted.workbook.sheets[0].rows[added.data.rowIndex][sheet.maxCol].v,'Tersimpan');}finally{await new Promise(resolve=>restarted.close(resolve));}
     console.log('API database isolated at '+dataDir+'; user database untouched.');
+  }finally{await new Promise(resolve=>server.close(resolve));}
+});
+
+test('inserted rows retain order and cell coordinates after restart and anchor deletion',async()=>{
+  const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'pdrb-row-order-')),secret='row-test';
+  let server=createApp({dataDir,secret}).listen(0,'127.0.0.1');await new Promise(r=>server.on('listening',r));
+  const call=async(url,token,body,method='GET')=>{const res=await fetch(`http://127.0.0.1:${server.address().port}/api${url}`,{method,headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return {status:res.status,data:await res.json()};};
+  try{
+    const admin=(await call('/auth/login','',{username:'admin',password:'admin123'},'POST')).data.token;
+    const created=await call('/workbooks',admin,{title:'Urutan uji',institution:'BULOG',table:{label:'Stok',columns:['Indikator','2026 TW 1'],rowLabels:['Beras','Jagung']}},'POST');
+    const url='/workbooks/'+created.data.workbook.id;
+    const add=(name,beforeRowIndex)=>call(url+'/row',admin,{sheetIndex:0,tableId:'blok-1',values:[name,null],beforeRowIndex},'POST');
+    assert.equal((await add('Tidak valid',0)).status,400);
+    const first=await add('Padi',1),middle=await add('Kedelai',2),nested=await add('Kacang',middle.data.rowIndex),last=await add('Ubi',null);
+    assert([first,middle,nested,last].every(r=>r.status===200));
+    assert.equal((await call(url+'/cell',admin,{sheetIndex:0,rowIndex:middle.data.rowIndex,colIndex:1,value:75},'PATCH')).status,200);
+    const verify=async expected=>{const sheet=(await call(url,admin)).data.workbook.sheets[0],block=detectBlocks(sheet)[0];assert.deepEqual(block.rowIndexes.map(r=>sheet.rows[r][0].v||sheet.rows[r][0]),expected);assert.equal(sheet.rows[middle.data.rowIndex][1].v,75);assert.deepEqual(block.displayEditRowIndexes,block.rowIndexes);};
+    await verify(['Padi','Beras','Kacang','Kedelai','Jagung','Ubi']);
+    await new Promise(resolve=>server.close(resolve));server=createApp({dataDir,secret}).listen(0,'127.0.0.1');await new Promise(r=>server.on('listening',r));
+    await verify(['Padi','Beras','Kacang','Kedelai','Jagung','Ubi']);
+    assert.equal((await call(url+'/table',admin,{sheetIndex:0,tableId:'blok-1',kind:'deleteRow',rowIndex:2},'PATCH')).status,200);
+    await verify(['Padi','Beras','Kacang','Kedelai','Ubi']);
   }finally{await new Promise(resolve=>server.close(resolve));}
 });
 
@@ -194,14 +288,14 @@ test('admin CRUD, institution cell editing, and append-only Bapenda templates pe
     wb=(await call(url,bulog)).data.workbook;assert.equal(detectBlocks(wb.sheets[0]).length,0);assert.equal(detectBlocks(wb.sheets[1]).length,1);
     assert.equal((await call(url,admin,{title:'Data dipindahkan',institution:'Dinas Pendidikan'},'PATCH')).status,200);
     assert.equal((await call(url,bulog)).status,403);assert.equal((await call(url,pendidikan)).status,200);
-    const upload=async csv=>{const form=new FormData();form.append('file',new Blob([csv]),'template-sama.csv');return call('/upload',bapenda,form,'POST');};
+    const upload=async csv=>{const form=new FormData();form.append('year','2026');form.append('quarter','1');form.append('file',new Blob([csv]),'template-sama.csv');return call('/upload',bapenda,form,'POST');};
     const first=await upload('Indikator,Nilai 2026\nPendapatan,125\n'),second=await upload('Jenis,Volume,Harga\nPajak,2,300\n');
     assert.equal(first.status,200);assert.equal(second.status,200);assert.notEqual(first.data.workbook.id,second.data.workbook.id);
     const uploadUrl='/workbooks/'+first.data.workbook.id;
     const updateTitle=await call(uploadUrl,admin,{title:'Template pertama Bapenda',institution:'Bapenda'},'PATCH');assert.equal(updateTitle.status,200);
     assert.equal((await call(uploadUrl+'/cell',admin,{...edit,value:130},'PATCH')).status,200);
     const events=(await call('/notifications',admin)).data.audit;assert(events.some(e=>e.action==='EDIT_CELL'&&e.details.workbookId===first.data.workbook.id&&e.details.dataTitle==='Template pertama Bapenda'));
-    assert.equal((await call(uploadUrl+'/cell',bapenda,edit,'PATCH')).status,403);
+    assert.equal((await call(uploadUrl+'/cell',bapenda,{...edit,value:120},'PATCH')).status,200);
     assert.equal((await call(uploadUrl+'/table',bapenda,template,'POST')).status,403);
     assert.equal((await call(uploadUrl,bapenda,null,'DELETE')).status,403);
     const listed=(await call('/workbooks',bapenda)).data.workbooks;assert(listed.some(w=>w.id===first.data.workbook.id));assert(listed.some(w=>w.id===second.data.workbook.id));
@@ -211,7 +305,7 @@ test('admin CRUD, institution cell editing, and append-only Bapenda templates pe
     try{
       const next=`http://127.0.0.1:${restarted.address().port}/api`;
       assert.equal((await fetch(next+url,{headers:{Authorization:`Bearer ${admin}`}})).status,404);
-      const persisted=await fetch(next+uploadUrl,{headers:{Authorization:`Bearer ${bapenda}`}}).then(r=>r.json());assert.equal(persisted.workbook.sheets[0].rows[1][1].v,130);
+      const persisted=await fetch(next+uploadUrl,{headers:{Authorization:`Bearer ${bapenda}`}}).then(r=>r.json());assert.equal(persisted.workbook.sheets[0].rows[1][1].v,120);
       const saved=JSON.parse(fs.readFileSync(path.join(dataDir,'db.json'),'utf8'));assert(saved.deletedWorkbooks[created.data.workbook.id]);assert.equal(saved.overrides[created.data.workbook.id]['0:1:1'].v,0);assert(saved.audit.some(a=>a.action==='DELETE_DATASET'&&a.details.dataTitle==='Data dipindahkan'));
     }finally{await new Promise(r=>restarted.close(r));}
   }finally{await new Promise(r=>server.close(r));}
@@ -253,7 +347,7 @@ test('notification recipients, read states, concurrent arrivals and history surv
     own=(await call('/notifications',bulog)).data;
     assert.equal(own.unreadCount,1);assert.equal(own.notifications[0].readAt,null);assert(own.notifications[1].readAt);assert.equal(own.audit.length,before);
     const latest=own.notifications[0].id;await call('/notifications/'+latest+'/read',bulog,null,'PATCH');
-    const form=new FormData();form.append('file',new Blob(['Indikator,Nilai\nPajak,10\n']),'notif.csv');form.append('title','Pelaporan Bapenda');
+    const form=new FormData();form.append('year','2026');form.append('quarter','1');form.append('file',new Blob(['Indikator,Nilai\nPajak,10\n']),'notif.csv');form.append('title','Pelaporan Bapenda');
     assert.equal((await call('/upload',bapenda,form,'POST')).status,200);
     adminInbox=(await call('/notifications/inbox',admin)).data;assert.equal(adminInbox.unreadCount,2);assert(adminInbox.notifications[0].message.includes('Bapenda'));assert.equal(adminInbox.notifications[0].dataTitle,'Pelaporan Bapenda');
     await call(url,admin,null,'DELETE');own=(await call('/notifications',bulog)).data;

@@ -26,7 +26,7 @@ export default function Dashboard(){
         <p>Di halaman Data PDRB, pilih tahun dan triwulan jika ingin melihat periode tertentu. Tekan <strong>Buka data</strong> untuk membaca tabel.</p>
         <dl className="quarter-guide"><dt>Triwulan 1</dt><dd>Januari sampai Maret</dd><dt>Triwulan 2</dt><dd>April sampai Juni</dd><dt>Triwulan 3</dt><dd>Juli sampai September</dd><dt>Triwulan 4</dt><dd>Oktober sampai Desember</dd></dl>
         <p>Tanda <strong>-</strong> berarti nilai belum tersedia, bukan nol. Jika tabel lebih lebar dari layar, geser area tabel ke samping.</p>
-        <div className="access-note"><h3>Akses Anda</h3><p>{isAdmin?'Sebagai admin, Anda dapat membuat, membaca, mengedit, dan menghapus data serta struktur tabel seluruh instansi.':user?.institution==='Bapenda'?'Anda dapat membaca data Bapenda dan mengunggah Excel/CSV dengan template pelaporan masing-masing. Setiap upload menjadi data baru. Tidak tersedia edit manual.':'Anda dapat membaca, mengisi, dan mengedit nilai tabel milik instansi sendiri, termasuk kolom kosong yang disiapkan admin. Tekan Edit data pada tabel; penambahan atau penghapusan struktur tetap dilakukan admin.'}</p></div>
+        <div className="access-note"><h3>Akses Anda</h3><p>{isAdmin?'Anda dapat mengelola seluruh data dan memantau isian tiap triwulan pada halaman Data PDRB.':user?.institution==='Bapenda'?'Anda dapat mengedit data milik Bapenda atau mengunggah Excel/CSV dengan memilih tahun dan triwulan laporan.':'Tekan Edit data di atas halaman untuk mengisi tabel instansi Anda. Status triwulan diperbarui dari nilai yang tersimpan. Struktur tabel tetap dikelola admin.'}</p></div>
       </aside>
     </div>
   </>;

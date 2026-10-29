@@ -12,6 +12,6 @@ export function periodLabel(workbook) {
     return years.length>1?`Beberapa periode (${years.join(', ')})`:`Beberapa periode pada ${years[0]}`;
   }
   return workbook.periodQuarter && workbook.periodYear
-    ? `Triwulan ${workbook.periodQuarter} · ${workbook.periodYear}`
+    ? `${workbook.periodYear} · Triwulan ${workbook.periodQuarter}`
     : workbook.periodYear || 'Periode belum ditentukan';
 }

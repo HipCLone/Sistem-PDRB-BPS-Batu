@@ -1,4 +1,10 @@
 const quarters={I:'1',II:'2',III:'3',IV:'4',1:'1',2:'2',3:'3',4:'4'};
+export function currentReportingPeriod(date=new Date()) {
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jakarta',year:'numeric',month:'numeric'}).formatToParts(date);
+  const year=parts.find(part=>part.type==='year').value;
+  const month=Number(parts.find(part=>part.type==='month').value);
+  return {year,quarter:Math.ceil(month/3)};
+}
 export function parsePeriod(text, fallbackYear=null) {
   const value=String(text||'');
   const quarter=quarters[value.match(/(?:triwulan|\btw)\s*[-_.]?\s*(IV|III|II|I|[1-4])\b/i)?.[1]?.toUpperCase()]||null;

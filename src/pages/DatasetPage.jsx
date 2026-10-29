@@ -7,13 +7,36 @@ import { detectBlocks } from '../lib/sheetPresentation.mjs';
 import { filterBlockPeriod, withNamedColumns } from '../lib/periods.mjs';
 import CleanDataTable from '../components/CleanDataTable';
 import { RowModal, ColumnModal, TemplateModal, DatasetManageModal, TableManageModal, DeleteModal, DrasticChangeModal } from '../components/modals';
+import { downloadTableCsv } from '../lib/tableCsv.mjs';
+import { downloadTableExcel } from '../lib/tableExcel.mjs';
 import { Empty, Loading, PageIntro, RouteFeedback } from '../components/ui';
+
+function DownloadMenu({sheet,block,disabled,onError}){
+  const menu=useRef(null);
+  useEffect(()=>{
+    const close=e=>{if(menu.current&&!menu.current.contains(e.target))menu.current.open=false;};
+    document.addEventListener('pointerdown',close);
+    return()=>document.removeEventListener('pointerdown',close);
+  },[]);
+  const download=format=>{
+    menu.current.open=false;
+    if(format==='csv')downloadTableCsv(sheet,block);
+    else downloadTableExcel(sheet,block).catch(onError);
+  };
+  return <details ref={menu} className="download-menu" onKeyDown={e=>{if(e.key==='Escape'&&menu.current.open){e.preventDefault();menu.current.open=false;menu.current.querySelector('summary')?.focus();}}}>
+    <summary className="secondary-btn" aria-disabled={disabled||undefined} onClick={e=>{if(disabled)e.preventDefault();}}>Download <span aria-hidden="true">▾</span></summary>
+    <div className="download-options" aria-label="Format unduhan">
+      <button type="button" disabled={disabled} onClick={()=>download('csv')}>CSV</button>
+      <button type="button" disabled={disabled} onClick={()=>download('excel')}>Excel</button>
+    </div>
+  </details>;
+}
 
 export default function DatasetPage(){
   const {id}=useParams(),location=useLocation(),navigate=useNavigate(),[params,setParams]=useSearchParams();
   const [data,setData]=useState(null),[error,setError]=useState(''),[loading,setLoading]=useState(true);
-  const [version,setVersion]=useState(0),[editing,setEditing]=useState(null),[modal,setModal]=useState(null),[notice,setNotice]=useState('');
-  const request=useRef(0),user=getUser(),isAdmin=user?.role==='admin',canEdit=!!user&&(isAdmin||user.institution!=='Bapenda');
+  const [version,setVersion]=useState(0),[editing,setEditing]=useState(null),[modal,setModal]=useState(null),[notice,setNotice]=useState(''),[downloadError,setDownloadError]=useState('');
+  const request=useRef(0),user=getUser(),isAdmin=user?.role==='admin',canEdit=!!user;
   const pendingChange=useRef(null);
   useEffect(()=>()=>{pendingChange.current?.reject(new Error('Nilai belum disimpan.'));pendingChange.current=null;},[id]);
   useEffect(()=>{const controller=new AbortController(),current=++request.current;setLoading(true);setError('');
@@ -27,7 +50,7 @@ export default function DatasetPage(){
   const blocks=useMemo(()=>sheet?detectBlocks(sheet):[],[sheet]);
   const year=params.get('tahun')||'all',quarter=params.get('triwulan')||'all';
   const years=[...new Set(data?.periods?.map(p=>p.year).filter(Boolean)||[])].sort().reverse();
-  const change=(key,value)=>{const next=new URLSearchParams(params);value==='all'?next.delete(key):next.set(key,value);if(key==='bagian'){for(const key of [...next.keys()])if(key.startsWith('halaman-'))next.delete(key);setEditing(null);}setParams(next,{replace:true});};
+  const change=(key,value)=>{const next=new URLSearchParams(params);value==='all'?next.delete(key):next.set(key,value);if(key==='bagian'){for(const key of [...next.keys()])if(key.startsWith('halaman-'))next.delete(key);}setParams(next,{replace:true});};
   const reload=()=>setVersion(v=>v+1);
   const mutate=async(path,body)=>{await api(`/workbooks/${encodeURIComponent(id)}/${path}`,{method:path==='cell'?'PATCH':'POST',body:JSON.stringify(body)});reload();};
   const saveCell=async(si,rowIndex,colIndex,value)=>{
@@ -49,34 +72,35 @@ export default function DatasetPage(){
   if(!data)return <RouteFeedback title="Berkas tidak ditemukan" text="Buka daftar data untuk memilih berkas yang tersedia."/>;
   return <>
     <Link className="back-link" to={back}>Kembali ke daftar data</Link>
-    <PageIntro title={datasetTitle(data)} text={`${data.institution} · ${periodLabel(data)}`} actions={isAdmin&&<div className="action-group"><button className="secondary-btn" disabled={loading} onClick={()=>setModal({kind:'dataset'})}>Kelola data</button><button className="primary-btn" disabled={loading} onClick={()=>setModal({kind:'template'})}>Tambah tabel</button></div>}/>
+    <PageIntro title={datasetTitle(data)} text={`${data.institution} · ${periodLabel(data)}`} actions={<div className="action-group">{canEdit&&<button className={editing!==null?'primary-btn':'secondary-btn'} disabled={loading} onClick={()=>setEditing(editing!==null?null:'all')}>{editing!==null?'Selesai edit':'Edit data'}</button>}{isAdmin&&<><button className="secondary-btn" disabled={loading} onClick={()=>setModal({kind:'dataset'})}>Kelola data</button><button className="primary-btn" disabled={loading} onClick={()=>setModal({kind:'template'})}>Tambah tabel</button></>}</div>}/>
     {notice&&<p className="success-box" role="status">{notice}</p>}
+    {downloadError&&<p className="error-box" role="alert">{downloadError}</p>}
     <section className="panel dataset-filters" aria-label="Pilihan data">
       <div className="filterbar">
         {availableSheets.length>1&&<label>Bagian data<select value={sheetIndex} onChange={e=>change('bagian',e.target.value)}>{availableSheets.map(({sheet:s,index:i})=><option key={i} value={i}>{sheetLabel(s.name)}</option>)}</select></label>}
-        <label>Triwulan<select disabled={editing!==null} value={quarter} onChange={e=>change('triwulan',e.target.value)}><option value="all">Semua triwulan</option>{[1,2,3,4].map(q=><option key={q} value={q}>Triwulan {q}</option>)}</select></label>
         <label>Tahun<select disabled={editing!==null} value={year} onChange={e=>change('tahun',e.target.value)}><option value="all">Semua tahun</option>{years.map(y=><option key={y}>{y}</option>)}</select></label>
+        <label>Triwulan<select disabled={editing!==null} value={quarter} onChange={e=>change('triwulan',e.target.value)}><option value="all">Semua triwulan</option>{[1,2,3,4].map(q=><option key={q} value={q}>Triwulan {q}</option>)}</select></label>
       </div>
       <p className="filter-hint">{editing!==null?'Mode edit menampilkan seluruh kolom tabel. Perubahan sel disimpan setelah berpindah dari kolom.':'Filter periode berlaku pada kolom yang memiliki keterangan tahun atau triwulan. Tabel yang terpisah pada sumber ditampilkan per bagian.'}</p>
     </section>
     {loading&&<p role="status">Memperbarui data...</p>}
     {!blocks.length&&<Empty title="Bagian ini belum berisi tabel" text="Pilih bagian data lain atau kembali ke daftar berkas."/>}
     {blocks.map(source=>{
-      const active=editing===source.id;
-      const block=active?{...source,columns:source.schemaColumns,labels:source.schemaLabels,headerPaths:source.schemaPaths,rowIndexes:[...new Set([...source.rowIndexes,...source.editableRowIndexes])].sort((a,b)=>a-b)}:filterBlockPeriod(withNamedColumns(source),year,quarter,data.periodYear);
+      const active=editing!==null;
+      const block=active?{...source,columns:source.schemaColumns,labels:source.schemaLabels,headerPaths:source.schemaPaths,rowIndexes:source.displayEditRowIndexes}:filterBlockPeriod(withNamedColumns(source),year,quarter,data.periodYear);
       const pageKey=`halaman-${source.id}`,total=Math.max(1,Math.ceil(block.rowIndexes.length/40)),page=Math.min(total,Math.max(1,Math.floor(Number(params.get(pageKey)))||1));
       const rows=block.rowIndexes.slice((page-1)*40,page*40).map(index=>({row:sheet.rows[index],index}));
       return <section className="panel dataset-table" key={source.id} data-table-id={source.id}>
-        <div className="dataset-heading"><h2>{source.label}</h2>{canEdit&&<div className="table-actions">{isAdmin&&<><button className="secondary-btn" disabled={loading} onClick={()=>setModal({kind:'row',block:source})}>Tambah baris</button><button className="secondary-btn" disabled={loading} onClick={()=>setModal({kind:'column',block:source})}>Tambah kolom</button><button className="secondary-btn" disabled={loading} onClick={()=>setModal({kind:'manage',block:source})}>Kelola tabel</button></>}<button className={active?'primary-btn':'secondary-btn'} onClick={()=>setEditing(active?null:source.id)}>{active?'Selesai edit':'Edit data'}</button></div>}</div>
+        <div className="dataset-heading"><h2>{source.label}</h2><div className="table-actions"><DownloadMenu sheet={sheet} block={block} disabled={loading||!block.columns.length} onError={()=>setDownloadError('File Excel belum dapat diunduh. Silakan coba lagi.')}/>{isAdmin&&<><button className="secondary-btn" disabled={loading} onClick={()=>setModal({kind:'row',block:source})}>Tambah baris</button><button className="secondary-btn" disabled={loading} onClick={()=>setModal({kind:'column',block:source})}>Tambah kolom</button><button className="secondary-btn" disabled={loading} onClick={()=>setModal({kind:'manage',block:source})}>Kelola tabel</button></>}</div></div>
         {block.columns.length?<CleanDataTable sheet={sheet} sheetIndex={sheetIndex} block={block} rows={rows} editing={active} onDeleteRow={isAdmin?r=>setModal({kind:'delete',block:source,operation:{kind:'deleteRow',rowIndex:r},label:`baris ${r+1}`}):undefined} onSave={saveCell}/>:<Empty title="Kolom belum tersedia" text={canEdit?'Ubah filter periode atau tekan Edit data untuk memeriksa struktur tabel.':'Tidak ada kolom yang dapat ditampilkan untuk pilihan ini. Ubah filter periode atau hubungi admin.'}/>}
         {total>1&&<div className="pagination" aria-label={`Halaman tabel ${source.label}`}><span>Halaman {page} dari {total}</span><div><button className="secondary-btn" disabled={page===1} onClick={()=>change(pageKey,String(page-1))}>Sebelumnya</button><button className="secondary-btn" disabled={page===total} onClick={()=>change(pageKey,String(page+1))}>Berikutnya</button></div></div>}
       </section>;
     })}
-    {modal?.kind==='row'&&<RowModal sheet={sheet} block={modal.block} onClose={()=>setModal(null)} onSubmit={async values=>{await mutate('row',{sheetIndex,tableId:modal.block.id,values});setModal(null);setNotice('Baris ditambahkan pada tabel tujuan.');}}/>}
+    {modal?.kind==='row'&&<RowModal sheet={sheet} block={modal.block} onClose={()=>setModal(null)} onSubmit={async(values,beforeRowIndex)=>{await mutate('row',{sheetIndex,tableId:modal.block.id,values,beforeRowIndex});setModal(null);setNotice('Baris ditambahkan pada tabel tujuan.');}}/>}
     {modal?.kind==='column'&&<ColumnModal block={modal.block} onClose={()=>setModal(null)} onSubmit={async label=>{await mutate('column',{sheetIndex,tableId:modal.block.id,label});setModal(null);setEditing(modal.block.id);setNotice('Kolom ditambahkan. Isi nilainya melalui mode edit.');}}/>}
     {modal?.kind==='template'&&<TemplateModal onClose={()=>setModal(null)} onSubmit={async({table})=>{const result=await api(`/workbooks/${encodeURIComponent(id)}/table`,{method:'POST',body:JSON.stringify(table)});setModal(null);setEditing(null);reload();change('bagian',String(result.sheetIndex));setNotice('Tabel baru tersedia untuk diisi instansi.');}}/>}
     {modal?.kind==='dataset'&&<DatasetManageModal data={data} onClose={()=>setModal(null)} onDelete={()=>setModal({kind:'deleteDataset'})} onSubmit={async body=>{await api(`/workbooks/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify(body)});setModal(null);reload();setNotice('Informasi data tersimpan.');}}/>}
-    {modal?.kind==='manage'&&<TableManageModal block={modal.block} onClose={()=>setModal(null)} onSubmit={body=>manageTable(modal.block,body)} onDelete={operation=>setModal({kind:'delete',block:modal.block,operation,label:operation.label})}/>}
+    {modal?.kind==='manage'&&<TableManageModal sheet={sheet} block={modal.block} onClose={()=>setModal(null)} onSubmit={body=>manageTable(modal.block,body)} onDelete={operation=>setModal({kind:'delete',block:modal.block,operation,label:operation.label})}/>}
     {modal?.kind==='delete'&&<DeleteModal title="Konfirmasi penghapusan" description={`Hapus ${modal.label} dari tabel ${modal.block.label}?`} onClose={()=>setModal(null)} onSubmit={()=>manageTable(modal.block,modal.operation)}/>}
     {modal?.kind==='deleteDataset'&&<DeleteModal title="Hapus dataset?" description={`Seluruh tabel pada ${datasetTitle(data)} akan dihapus dari daftar aktif.`} onClose={()=>setModal(null)} onSubmit={async()=>{await api(`/workbooks/${encodeURIComponent(id)}`,{method:'DELETE'});navigate(back,{replace:true});}}/>}
     {modal?.kind==='drastic'&&<DrasticChangeModal change={modal.change} onClose={cancelChange} onSubmit={async reason=>{

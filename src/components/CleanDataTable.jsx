@@ -57,8 +57,7 @@ export default function CleanDataTable({sheet,sheetIndex,block,rows,editing,onSa
   useEffect(()=>{viewport.current.scrollTop=0;},[rows[0]?.index]);
   const scrollTo=left=>{viewport.current.scrollTo({left,behavior:'auto'});measure();};
   const shift=direction=>scrollTo(viewport.current.scrollLeft+direction*Math.max(80,viewport.current.clientWidth*.7));
-  const overflow=position.max>1,atEnd=position.max-position.left<=1;
-  const percentage=position.max?Math.round(position.left/position.max*100):0;
+  const overflow=position.max>1;
 
   return <>
     <TableSourceNotes block={block}/>
@@ -70,10 +69,7 @@ export default function CleanDataTable({sheet,sheetIndex,block,rows,editing,onSa
       <span>{editing?'Isi atau ubah nilai, lalu tekan Enter atau pindah sel untuk menyimpan.':'Kolom berjudul tetap ditampilkan meskipun belum diisi. "-" berarti nilai belum tersedia.'}</span>
     </div>
 
-    <div className="table-view-controls">
-      <label className="table-position"><span className="sr-only">Geser kolom tabel {block.label}</span><input type="range" min={0} max={Math.max(1,position.max)} step={1} value={position.left} disabled={!overflow} aria-controls={regionId} aria-valuetext={overflow?`${percentage}% dari lebar yang dapat digeser`:'Semua kolom yang ditampilkan muat di area tabel'} onChange={e=>scrollTo(Number(e.target.value))}/></label>
-      <p id={hintId} className="table-scroll-hint">{overflow?(atEnd?'Akhir tabel. Geser bar ke kiri untuk melihat kolom sebelumnya.':'Geser bar ke kanan atau kiri untuk melihat kolom lainnya.'):'Semua kolom yang ditampilkan muat di area tabel.'}</p>
-    </div>
+    <p id={hintId} className="table-scroll-hint">{overflow?'Geser tabel ke kanan atau kiri menggunakan scrollbar di bawah tabel. Keyboard: panah kiri/kanan, Home/End.':'Semua kolom yang ditampilkan muat di area tabel.'}</p>
     <div ref={viewport} id={regionId} className={`excel-wrap clean-table-wrap${position.narrow?' table-narrow':''}`} tabIndex={0} role="region" aria-describedby={hintId} aria-label={`Tabel ${block.label}, geser untuk melihat semua kolom`} onScroll={measure} onKeyDown={e=>{
       if(e.target!==e.currentTarget)return;
       if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();shift(e.key==='ArrowLeft'?-1:1);}

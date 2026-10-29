@@ -11,6 +11,7 @@ const presentation=import('../src/lib/sheetPresentation.mjs');
 const periodsModule=import('../src/lib/periods.mjs');
 const labelsModule=import('../src/lib/datasetLabels.mjs');
 const drasticModule=import('../src/lib/drasticChanges.mjs');
+const quarterStatusModule=import('../src/lib/quarterStatus.mjs');
 
 function createApp(options={}) {
 if(!options.storage&&!options.dataDir)throw new Error('Penyimpanan PostgreSQL wajib untuk runtime. JSON hanya tersedia pada pengujian terisolasi.');
@@ -121,7 +122,7 @@ function applyOverrides(wb){
       const row=Array.isArray(added)?added:added.values;
       const normalized=row.slice(0,sheet.maxCol);
       while(normalized.length<sheet.maxCol) normalized.push(null);
-      if(added.tableId){sheet.tableRows||=[];sheet.tableRows.push({rowIndex:sheet.rows.length,tableId:added.tableId});}
+      if(added.tableId){sheet.tableRows||=[];sheet.tableRows.push({rowIndex:sheet.rows.length,tableId:added.tableId,...(added.beforeRowIndex!=null?{beforeRowIndex:added.beforeRowIndex}:{})});}
       sheet.rows.push(normalized);
     }
   }
@@ -143,7 +144,7 @@ async function meta(w){
   const {workbookPeriods}=await periodsModule;
   const {datasetTitle}=await labelsModule;
   const blocksBySheet=w.sheets.map(detectBlocks);
-  const periods=workbookPeriods(w,blocksBySheet);
+  const periods=w.reportingYear&&w.reportingQuarter?[{year:String(w.reportingYear),quarter:String(w.reportingQuarter)}]:workbookPeriods(w,blocksBySheet);
   const years=[...new Set(periods.map(p=>p.year))];
   const result={id:w.id,file:w.file,title:datasetTitle(w,blocksBySheet),institution:w.institution,sector:w.sector,periods,
     periodYear:years.length===1?years[0]:null,periodQuarter:periods.length===1?periods[0].quarter:null};
@@ -158,10 +159,11 @@ function audit(user, action, details){
   if(user.role==='admin'&&['CREATE_DATASET','ADD_TABLE'].includes(action)){
     recipients=db.users.filter(u=>u.role!=='admin'&&u.institution===details.institution);
     title='Tabel baru dari admin';message=`Admin menambahkan tabel ${details.sheet||details.dataTitle||'pelaporan'} pada ${details.dataTitle||'data instansi Anda'}.`;
-  }else if(user.role!=='admin'&&['EDIT_CELL','UPLOAD_FILE'].includes(action)){
+  }else if(user.role!=='admin'&&['EDIT_CELL','UPLOAD_FILE','SUBMIT_REPORT'].includes(action)){
     recipients=db.users.filter(u=>u.role==='admin');
     title=action==='EDIT_CELL'?'Data instansi diperbarui':'Upload baru dari instansi';
     message=`${user.institution||user.name} ${action==='EDIT_CELL'?'mengisi atau mengedit data':'mengunggah data baru'} pada ${details.dataTitle||'data pelaporan instansi'}.`;
+    if(action==='SUBMIT_REPORT'){title='Laporan dikumpulkan';message=`${user.institution} mengumpulkan laporan tahun ${details.year}, triwulan ${details.quarter}.`;}
     if(details.drasticChange){
       title='Perubahan data drastis';
       const change=details.drasticChange;
@@ -202,6 +204,36 @@ app.post('/api/auth/login',(req,res)=>{
   res.json({token:tokenFor(safe),user:safe});
 });
 app.get('/api/me',auth,(req,res)=>res.json({user:req.user}));
+
+const reportingPeriod=body=>['string','number'].includes(typeof body?.year)&&['string','number'].includes(typeof body?.quarter)&&/^20\d{2}$/.test(String(body.year))&&/^[1-4]$/.test(String(body.quarter));
+function recordSubmission(user,wb,year,quarter){
+  db.submissions||={};
+  db.submissions[wb.institution]||={};
+  db.submissions[wb.institution][`${year}:${quarter}`]||={};
+  db.submissions[wb.institution][`${year}:${quarter}`][wb.id]={year:String(year),quarter:String(quarter),at:new Date().toISOString(),by:user.name,workbookId:wb.id};
+}
+app.get('/api/reporting-status',auth,async(req,res)=>{
+  const year=String(req.query.year||new Date().getFullYear());
+  if(!/^20\d{2}$/.test(year))return res.status(400).json({message:'Tahun tidak valid'});
+  const names=req.user.role==='admin'?institutions():[req.user.institution];
+  const {quarterStatus}=await quarterStatusModule;
+  const workbooks=allWorkbooks().filter(w=>canAccessWorkbook(req.user,w)).map(w=>({id:w.id,institution:w.institution,quarters:quarterStatus(applyOverrides(w),year)}));
+  const rows=names.map(institution=>({institution,quarters:[1,2,3,4].map(q=>{
+    const entries=workbooks.filter(w=>w.institution===institution).map(w=>w.quarters[q-1]);
+    const status=entries.some(entry=>entry.status==='filled')?'filled':entries.some(entry=>entry.status==='unknown')?'unknown':'empty';
+    return {quarter:q,submitted:status==='filled',status};
+  })}));
+  res.json({year,rows,workbooks});
+});
+app.post('/api/workbooks/:id/submit',auth,(req,res)=>{
+  const wb=findWorkbook(req.params.id);
+  if(!wb)return res.status(404).json({message:'Dataset tidak ditemukan'});
+  if(!canAccessWorkbook(req.user,wb))return res.status(403).json({message:'Pengumpulan manual tidak tersedia untuk instansi lain'});
+  if(!reportingPeriod(req.body))return res.status(400).json({message:'Pilih tahun dan triwulan laporan'});
+  recordSubmission(req.user,wb,req.body.year,req.body.quarter);
+  audit(req.user,'SUBMIT_REPORT',{workbookId:wb.id,institution:wb.institution,year:String(req.body.year),quarter:String(req.body.quarter)});
+  res.json({ok:true});
+});
 
 app.get('/api/workbooks',auth,async(req,res)=>{
   const all=allWorkbooks();
@@ -245,7 +277,6 @@ app.get('/api/workbooks/:id',auth,async(req,res)=>{
 app.patch('/api/workbooks/:id/cell',auth,async(req,res)=>{
   const wb=findWorkbook(req.params.id); if(!wb) return res.status(404).json({message:'Dataset tidak ditemukan'});
   if(!canAccessWorkbook(req.user,wb)) return res.status(403).json({message:'Akses ditolak'});
-  if(req.user.role!=='admin'&&req.user.institution==='Bapenda')return res.status(403).json({message:'Bapenda hanya dapat mengunggah Excel/CSV, bukan mengedit nilai manual'});
   const {sheetIndex,rowIndex,colIndex,value,reason,comparisonToken}=req.body||{};
   if(!validIndex(sheetIndex)||!validIndex(rowIndex)||!validIndex(colIndex)||!validValue(value)) return res.status(400).json({message:'Lokasi atau nilai sel tidak valid'});
   const sheet=applyOverrides(wb).sheets[sheetIndex];
@@ -282,11 +313,12 @@ app.post('/api/workbooks/:id/row',auth,admin,async(req,res)=>{
   const wb=findWorkbook(req.params.id); if(!wb) return res.status(404).json({message:'Dataset tidak ditemukan'});
   if(req.user.role!=='admin') return res.status(403).json({message:'Hanya administrator yang dapat menambahkan baris'});
   if(!canAccessWorkbook(req.user,wb)) return res.status(403).json({message:'Akses ditolak'});
-  const {sheetIndex,values,tableId}=req.body||{}; const sheet=applyOverrides(wb).sheets[sheetIndex];
+  const {sheetIndex,values,tableId,beforeRowIndex}=req.body||{}; const sheet=applyOverrides(wb).sheets[sheetIndex];
   if(!validIndex(sheetIndex)||!sheet || !Array.isArray(values)||!values.every(validValue)||!values.some(v=>v!==null&&String(v).trim()!=='')) return res.status(400).json({message:'Isi sedikitnya satu nilai pada baris baru'});
   const {detectBlocks}=await presentation;
   const block=detectBlocks(sheet).find(b=>b.id===tableId);
   if(!block)return res.status(400).json({message:'Pilih tabel tujuan yang valid'});
+  if(beforeRowIndex!=null&&(!validIndex(beforeRowIndex)||!block.editableRowIndexes.includes(beforeRowIndex)))return res.status(400).json({message:'Pilih posisi baris yang tersedia pada tabel tujuan'});
   if(values.some((v,c)=>v!==null&&String(v).trim()!==''&&!block.schemaColumns.includes(c)))return res.status(400).json({message:'Nilai berada di luar kolom tabel tujuan'});
   const columnCount=sheet.maxCol;
   const row=values.slice(0,columnCount).map(v=>v===''?null:{v,t:typeof v==='number'?'number':'string',calc:null,fmt:'General'});
@@ -294,7 +326,7 @@ app.post('/api/workbooks/:id/row',auth,admin,async(req,res)=>{
   if(!db.addedRows[wb.id]) db.addedRows[wb.id]={};
   if(!db.addedRows[wb.id][sheetIndex]) db.addedRows[wb.id][sheetIndex]=[];
   const rowIndex=sheet.rows.length;
-  db.addedRows[wb.id][sheetIndex].push({values:row,tableId});
+  db.addedRows[wb.id][sheetIndex].push({values:row,tableId,...(beforeRowIndex!=null?{beforeRowIndex}:{})});
   audit(req.user,'ADD_ROW',{workbookId:wb.id,workbook:wb.file,sheet:sheet.name,table:block.label});
   res.json({ok:true,rowIndex});
 });
@@ -332,10 +364,10 @@ app.patch('/api/workbooks/:id/table',auth,admin,async(req,res)=>{
   const sheet=validIndex(sheetIndex)?applyOverrides(wb).sheets[sheetIndex]:null;
   const {detectBlocks}=await presentation;const block=sheet&&detectBlocks(sheet).find(b=>b.id===tableId);
   if(!block)return res.status(400).json({message:'Tabel tujuan tidak tersedia'});
-  const valid=['rename','delete','deleteRow','deleteColumn','renameColumn'];
+  const valid=['rename','delete','deleteRow','deleteColumn','renameColumn','renameRow'];
   if(!valid.includes(kind))return res.status(400).json({message:'Tindakan tidak valid'});
-  if(['rename','renameColumn'].includes(kind)&&!textValid(label,200))return res.status(400).json({message:'Nama wajib diisi, maksimal 200 karakter'});
-  if(kind==='deleteRow'&&(!validIndex(rowIndex)||!block.editableRowIndexes.includes(rowIndex)||block.sectionRows.includes(rowIndex)))return res.status(400).json({message:'Pilih baris data yang tersedia'});
+  if(['rename','renameColumn','renameRow'].includes(kind)&&!textValid(label,200))return res.status(400).json({message:'Nama wajib diisi, maksimal 200 karakter'});
+  if(['deleteRow','renameRow'].includes(kind)&&(!validIndex(rowIndex)||!block.editableRowIndexes.includes(rowIndex)||block.sectionRows.includes(rowIndex)))return res.status(400).json({message:'Pilih baris data yang tersedia'});
   if(['deleteColumn','renameColumn'].includes(kind)&&(!validIndex(colIndex)||!block.schemaColumns.includes(colIndex)))return res.status(400).json({message:'Pilih kolom yang tersedia'});
   if(kind==='deleteColumn'&&block.schemaColumns.length<=1)return res.status(400).json({message:'Kolom terakhir tidak dapat dihapus. Hapus tabel jika tidak diperlukan.'});
   if(kind==='renameColumn'&&block.schemaLabels.some((name,i)=>block.schemaColumns[i]!==colIndex&&name.toLowerCase()===label.trim().toLowerCase()))return res.status(400).json({message:'Nama kolom sudah digunakan pada tabel ini'});
@@ -345,7 +377,11 @@ app.patch('/api/workbooks/:id/table',auth,admin,async(req,res)=>{
   if(kind==='deleteRow'){state.deletedRows||=[];state.deletedRows.push(rowIndex);}
   if(kind==='deleteColumn'){state.deletedColumns||=[];state.deletedColumns.push(colIndex);}
   if(kind==='renameColumn'){state.columnLabels||={};state.columnLabels[colIndex]=label.trim();}
-  audit(req.user,{rename:'RENAME_TABLE',delete:'DELETE_TABLE',deleteRow:'DELETE_ROW',deleteColumn:'DELETE_COLUMN',renameColumn:'RENAME_COLUMN'}[kind],{workbookId:wb.id,workbook:wb.file,institution:wb.institution,sheet:sheet.name,table:block.label,row:rowIndex,col:colIndex,label});
+  if(kind==='renameRow'){
+    const descriptor=/^(no\.?|nomor|kode rekening)$/i.test(block.schemaLabels[0]||'')&&block.schemaColumns.length>1?block.schemaColumns[1]:block.schemaColumns[0];
+    db.overrides[wb.id]||={};db.overrides[wb.id][`${sheetIndex}:${rowIndex}:${descriptor}`]={v:label.trim(),t:'string',calc:null,fmt:'General'};
+  }
+  audit(req.user,{rename:'RENAME_TABLE',delete:'DELETE_TABLE',deleteRow:'DELETE_ROW',deleteColumn:'DELETE_COLUMN',renameColumn:'RENAME_COLUMN',renameRow:'RENAME_ROW'}[kind],{workbookId:wb.id,workbook:wb.file,institution:wb.institution,sheet:sheet.name,table:block.label,row:rowIndex,col:colIndex,label});
   res.json({ok:true});
 });
 
@@ -354,6 +390,7 @@ app.post('/api/upload',auth,(req,res,next)=>req.user.role==='admin'||req.user.in
   const removeTemporaryFile=()=>{ try{fs.unlinkSync(req.file.path)}catch{} };
   const extension=path.extname(req.file.originalname).toLowerCase();
   const title=req.body.title;
+  if(!reportingPeriod(req.body)){removeTemporaryFile();return res.status(400).json({message:'Pilih tahun dan triwulan pelaporan sebelum mengunggah'});}
   if(title!==undefined&&(typeof title!=='string'||title.length>160)){removeTemporaryFile();return res.status(400).json({message:'Judul data maksimal 160 karakter'});}
   if(!['.xlsx','.xls','.csv'].includes(extension)) { removeTemporaryFile(); return res.status(400).json({message:'Format file harus Excel (.xlsx/.xls) atau CSV'}); }
   if(req.user.role!=='admin' && req.user.institution!=='Bapenda') { removeTemporaryFile(); return res.status(403).json({message:'Upload file hanya tersedia untuk Bapenda'}); }
@@ -366,8 +403,8 @@ app.post('/api/upload',auth,(req,res,next)=>req.user.role==='admin'||req.user.in
     if(!sheets.some(s=>s.rows.length))throw new Error('File kosong. Pilih file yang memiliki judul atau data.');
     const {detectBlocks}=await presentation;
     sheets.forEach(sheet=>{sheet.headerGroups=detectBlocks(sheet).map(block=>block.headerRows);});
-    const record={id,file:req.file.originalname,title:title?.trim()||undefined,institution,pdrbCode:null,sector:'Upload lokal',sheets};
-    db.uploadedWorkbooks.push(record); audit(req.user,'UPLOAD_FILE',{file:req.file.originalname,workbookId:id,institution,dataTitle:(await meta(record)).title});
+    const record={id,file:req.file.originalname,title:title?.trim()||undefined,institution,pdrbCode:null,sector:'Upload lokal',reportingYear:String(req.body.year),reportingQuarter:String(req.body.quarter),sheets};
+    db.uploadedWorkbooks.push(record);recordSubmission(req.user,record,req.body.year,req.body.quarter); audit(req.user,'UPLOAD_FILE',{file:req.file.originalname,workbookId:id,institution,dataTitle:(await meta(record)).title,year:record.reportingYear,quarter:record.reportingQuarter});
     removeTemporaryFile(); res.json({ok:true,workbook:await meta(record)});
   }catch(e){ removeTemporaryFile(); res.status(400).json({message:`Gagal membaca Excel: ${e.message}`}); }
 });
